@@ -1,0 +1,6 @@
+{
+  "name": "Supermarket POS",
+  "description": "Supermarket POS, inventory auditing, financial analysis and profit prediction system",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}
