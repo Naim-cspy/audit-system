@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8"?>
 <layer-list xmlns:android="http://schemas.android.com/apk/res/android">
     <item
-        android:width="66dp"
-        android:height="66dp"
-        android:drawable="@drawable/supermarket_pos_icon_1790175510411"
+        android:width="70dp"
+        android:height="70dp"
+        android:drawable="@drawable/img_app_logo_1790177482465"
         android:gravity="center" />
 </layer-list>

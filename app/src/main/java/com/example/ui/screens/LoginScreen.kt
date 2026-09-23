@@ -1,6 +1,8 @@
 package com.example.ui.screens
 
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.border
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -38,12 +40,16 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.R
 import com.example.ui.theme.CriticalRed
 import com.example.ui.theme.SupermarketGreen
 import com.example.ui.theme.SupermarketGreenDark
@@ -78,21 +84,17 @@ fun LoginScreen(
                 horizontalAlignment = Alignment.CenterHorizontally
             ) {
                 // App Logo Badge
-                Box(
+                Image(
+                    painter = painterResource(id = R.drawable.img_app_logo_1790177482465),
+                    contentDescription = "Supermarket POS Logo",
                     modifier = Modifier
-                        .size(64.dp)
-                        .background(SupermarketGreenLight, CircleShape),
-                    contentAlignment = Alignment.Center
-                ) {
-                    Icon(
-                        imageVector = Icons.Default.PointOfSale,
-                        contentDescription = "POS Icon",
-                        tint = SupermarketGreen,
-                        modifier = Modifier.size(36.dp)
-                    )
-                }
+                        .size(80.dp)
+                        .clip(RoundedCornerShape(18.dp))
+                        .border(2.dp, SupermarketGreen.copy(alpha = 0.3f), RoundedCornerShape(18.dp)),
+                    contentScale = ContentScale.Crop
+                )
 
-                Spacer(modifier = Modifier.height(16.dp))
+                Spacer(modifier = Modifier.height(14.dp))
 
                 Text(
                     text = "Supermarket POS & Audit",
