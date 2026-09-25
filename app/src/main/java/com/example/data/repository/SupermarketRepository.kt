@@ -4,12 +4,17 @@ import com.example.data.db.AppDatabase
 import com.example.data.model.AuditLogEntity
 import com.example.data.model.BalanceEntity
 import com.example.data.model.CartItem
+import com.example.data.model.CategoryDemandItem
 import com.example.data.model.FinancialSummary
 import com.example.data.model.ProductEntity
 import com.example.data.model.ProfitPrediction
 import com.example.data.model.Receipt
 import com.example.data.model.ReceiptItem
+import com.example.data.model.RegionalMarketInsight
 import com.example.data.model.SaleEntity
+import com.example.data.model.SecurityEventEntity
+import com.example.data.model.StoreProfile
+import com.example.data.model.SyncEventEntity
 import com.example.data.model.UserEntity
 import com.example.data.security.PasswordSecurity
 import kotlinx.coroutines.Dispatchers
@@ -28,12 +33,19 @@ class SupermarketRepository(private val db: AppDatabase) {
     private val balanceDao = db.balanceDao()
     private val auditLogDao = db.auditLogDao()
     private val userDao = db.userDao()
+    private val syncEventDao = db.syncEventDao()
+    private val securityEventDao = db.securityEventDao()
+
+    val currentStoreProfile = StoreProfile()
 
     val allProducts: Flow<List<ProductEntity>> = productDao.getAllProducts()
     val recentSales: Flow<List<SaleEntity>> = saleDao.getRecentSales(15)
     val balanceHistory: Flow<List<BalanceEntity>> = balanceDao.getAllHistoryDesc()
     val allUsers: Flow<List<UserEntity>> = userDao.getAllUsers()
     val auditLogs: Flow<List<AuditLogEntity>> = auditLogDao.getRecentLogs(30)
+    val allSyncEvents: Flow<List<SyncEventEntity>> = syncEventDao.getRecentSyncEvents(40)
+    val allSecurityEvents: Flow<List<SecurityEventEntity>> = securityEventDao.getRecentSecurityEvents(40)
+    val failedSyncCount: Flow<Int> = syncEventDao.getFailedCount()
 
     fun getStockWarnings(threshold: Int = 50): Flow<List<ProductEntity>> {
         return productDao.getStockWarnings(threshold)
@@ -147,6 +159,21 @@ class SupermarketRepository(private val db: AppDatabase) {
             items = processedReceiptItems,
             total = totalAmount,
             itemCount = processedReceiptItems.sumOf { it.quantity }
+        )
+
+        // Log cloud sync event for transaction
+        syncEventDao.insert(
+            SyncEventEntity(
+                sync_id = "SYNC-${UUID.randomUUID().toString().take(8).uppercase()}",
+                store_id = currentStoreProfile.storeId,
+                device_id = currentStoreProfile.activeTerminalId,
+                user_id = customerId,
+                timestamp = nowMs,
+                operation = "CHECKOUT_TRANSACTION",
+                entity_type = "SALE",
+                entity_id = receipt.receiptId,
+                status = "SUCCESS"
+            )
         )
 
         Result.success(receipt)
@@ -403,10 +430,38 @@ class SupermarketRepository(private val db: AppDatabase) {
         val cleanPass = passwordPlain.trim()
         if (cleanUser.isEmpty() || cleanPass.isEmpty()) return@withContext null
 
-        val user = userDao.getByUsername(cleanUser) ?: return@withContext null
+        val user = userDao.getByUsername(cleanUser)
+        if (user == null) {
+            securityEventDao.insert(
+                SecurityEventEntity(
+                    store_id = currentStoreProfile.storeId,
+                    user_id = cleanUser,
+                    device_id = currentStoreProfile.activeTerminalId,
+                    event_type = "FAILED_LOGIN_UNKNOWN_USER",
+                    severity = "WARNING",
+                    endpoint_or_action = "AUTH_LOGIN",
+                    result = "BLOCKED",
+                    reason = "User '$cleanUser' not found in store registry"
+                )
+            )
+            return@withContext null
+        }
+
         if (PasswordSecurity.verifyPassword(cleanPass, user.password_hash, user.salt)) {
             user
         } else {
+            securityEventDao.insert(
+                SecurityEventEntity(
+                    store_id = currentStoreProfile.storeId,
+                    user_id = cleanUser,
+                    device_id = currentStoreProfile.activeTerminalId,
+                    event_type = "FAILED_LOGIN_BAD_CREDENTIALS",
+                    severity = "WARNING",
+                    endpoint_or_action = "AUTH_LOGIN",
+                    result = "BLOCKED",
+                    reason = "Invalid password attempt for account '$cleanUser'"
+                )
+            )
             null
         }
     }
@@ -546,5 +601,125 @@ class SupermarketRepository(private val db: AppDatabase) {
         }
 
         sb.toString()
+    }
+
+    suspend fun exportJsonBackup(): String = withContext(Dispatchers.IO) {
+        val products = productDao.getAllProducts().first()
+        val sales = saleDao.getAllSales().first()
+        val balances = balanceDao.getAllHistory().first()
+        val audits = auditLogDao.getRecentLogs(50).first()
+        val syncs = syncEventDao.getRecentSyncEvents(50).first()
+
+        val ts = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault()).format(Date())
+
+        val sb = StringBuilder()
+        sb.append("{\n")
+        sb.append("  \"store_profile\": {\n")
+        sb.append("    \"store_id\": \"${currentStoreProfile.storeId}\",\n")
+        sb.append("    \"store_name\": \"${currentStoreProfile.storeName}\",\n")
+        sb.append("    \"region\": \"${currentStoreProfile.region}\",\n")
+        sb.append("    \"terminal_id\": \"${currentStoreProfile.activeTerminalId}\",\n")
+        sb.append("    \"exported_at\": \"$ts\"\n")
+        sb.append("  },\n")
+
+        // Products
+        sb.append("  \"products\": [\n")
+        products.forEachIndexed { i, p ->
+            sb.append("    {\n")
+            sb.append("      \"product_id\": \"${p.product_id}\",\n")
+            sb.append("      \"name\": \"${p.product_name.replace("\"", "\\\"")}\",\n")
+            sb.append("      \"price\": ${p.product_price},\n")
+            sb.append("      \"stock_left\": ${p.product_amount_left},\n")
+            sb.append("      \"stock_sold\": ${p.product_amount_sold},\n")
+            sb.append("      \"category\": \"${p.product_type}\"\n")
+            sb.append("    }${if (i < products.size - 1) "," else ""}\n")
+        }
+        sb.append("  ],\n")
+
+        // Sales
+        sb.append("  \"sales\": [\n")
+        sales.forEachIndexed { i, s ->
+            sb.append("    {\n")
+            sb.append("      \"sale_id\": \"${s.sale_id}\",\n")
+            sb.append("      \"product_id\": \"${s.product_id}\",\n")
+            sb.append("      \"quantity\": ${s.quantity},\n")
+            sb.append("      \"price\": ${s.price},\n")
+            sb.append("      \"date\": \"${s.sale_date}\",\n")
+            sb.append("      \"customer_id\": \"${s.customer_id}\"\n")
+            sb.append("    }${if (i < sales.size - 1) "," else ""}\n")
+        }
+        sb.append("  ],\n")
+
+        // Ledger
+        sb.append("  \"ledger_entries\": [\n")
+        balances.forEachIndexed { i, b ->
+            sb.append("    {\n")
+            sb.append("      \"id\": ${b.id},\n")
+            sb.append("      \"date\": \"${b.date}\",\n")
+            sb.append("      \"starting\": ${b.budget_starting},\n")
+            sb.append("      \"in\": ${b.money_in},\n")
+            sb.append("      \"out\": ${b.money_out},\n")
+            sb.append("      \"reason\": \"${b.reason.replace("\"", "\\\"")}\"\n")
+            sb.append("    }${if (i < balances.size - 1) "," else ""}\n")
+        }
+        sb.append("  ],\n")
+
+        // Sync Events
+        sb.append("  \"sync_events\": [\n")
+        syncs.forEachIndexed { i, sy ->
+            sb.append("    {\n")
+            sb.append("      \"sync_id\": \"${sy.sync_id}\",\n")
+            sb.append("      \"operation\": \"${sy.operation}\",\n")
+            sb.append("      \"entity_type\": \"${sy.entity_type}\",\n")
+            sb.append("      \"entity_id\": \"${sy.entity_id}\",\n")
+            sb.append("      \"status\": \"${sy.status}\",\n")
+            sb.append("      \"timestamp\": ${sy.timestamp}\n")
+            sb.append("    }${if (i < syncs.size - 1) "," else ""}\n")
+        }
+        sb.append("  ]\n")
+
+        sb.append("}\n")
+        sb.toString()
+    }
+
+    suspend fun getRegionalMarketInsights(): RegionalMarketInsight = withContext(Dispatchers.IO) {
+        val products = productDao.getAllProducts().first()
+        val sales = saleDao.getAllSales().first()
+
+        val totalRevenue = sales.sumOf { it.quantity * it.price }
+        val avgTicket = if (sales.isNotEmpty()) totalRevenue / sales.size else 0.0
+
+        val categoryGroups = products.groupBy { it.product_type }
+        val categorySales = mutableListOf<CategoryDemandItem>()
+
+        val totalUnitsSold = sales.sumOf { it.quantity }.coerceAtLeast(1)
+
+        categoryGroups.forEach { (cat, prods) ->
+            val pIds = prods.map { it.product_id.uppercase() }.toSet()
+            val catSoldUnits = sales.filter { it.product_id.uppercase() in pIds }.sumOf { it.quantity }
+            val catRevenue = sales.filter { it.product_id.uppercase() in pIds }.sumOf { it.quantity * it.price }
+            val pct = ((catSoldUnits.toDouble() / totalUnitsSold.toDouble()) * 100).toInt()
+            categorySales.add(
+                CategoryDemandItem(
+                    category = cat,
+                    percentage = pct.coerceAtLeast(5), // floor for visualization
+                    unitSales = catSoldUnits,
+                    revenue = catRevenue
+                )
+            )
+        }
+
+        val sortedProds = products.sortedByDescending { it.product_amount_sold }
+        val fastMoving = sortedProds.take(3).map { "${it.product_name} (${it.product_amount_sold} sold)" }
+        val slowMoving = sortedProds.reversed().take(2).map { "${it.product_name} (${it.product_amount_left} in stock)" }
+
+        RegionalMarketInsight(
+            regionName = currentStoreProfile.region,
+            totalTransactionsAnalyzed = sales.size,
+            averageTicketSize = Math.round(avgTicket * 100.0) / 100.0,
+            categoryShare = categorySales.sortedByDescending { it.percentage },
+            fastMovingProducts = fastMoving,
+            slowMovingProducts = slowMoving
+        )
     }
 }

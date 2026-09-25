@@ -14,6 +14,8 @@ data class ProductEntity(
     val date_sold: String = "",
     val date_filled: String = "",
     val product_type: String = "General",
+    val store_id: String = "STR-LBN-NAB-001",
+    val sync_status: String = "SYNCED",
     val created_at: Long = System.currentTimeMillis(),
     val updated_at: Long = System.currentTimeMillis()
 )
@@ -28,6 +30,9 @@ data class SaleEntity(
     val price: Double,
     val sale_date: String,
     val customer_id: String = "C101",
+    val cashier_id: String = "admin",
+    val store_id: String = "STR-LBN-NAB-001",
+    val sync_status: String = "SYNCED",
     val created_at: Long = System.currentTimeMillis()
 )
 
@@ -40,6 +45,8 @@ data class BalanceEntity(
     val money_in: Double = 0.0,
     val money_out: Double = 0.0,
     val reason: String = "",
+    val store_id: String = "STR-LBN-NAB-001",
+    val sync_status: String = "SYNCED",
     val created_at: Long = System.currentTimeMillis()
 )
 
@@ -49,6 +56,8 @@ data class AuditLogEntity(
     val id: Int = 0,
     val action: String,
     val details: String,
+    val store_id: String = "STR-LBN-NAB-001",
+    val user_id: String = "admin",
     val timestamp: Long = System.currentTimeMillis()
 )
 
@@ -60,7 +69,66 @@ data class UserEntity(
     val password_hash: String,
     val salt: String = "",
     val role: String = "cashier", // "admin" or "cashier"
+    val store_id: String = "STR-LBN-NAB-001",
     val created_at: Long = System.currentTimeMillis()
+)
+
+@Entity(tableName = "sync_events")
+data class SyncEventEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val sync_id: String,
+    val store_id: String = "STR-LBN-NAB-001",
+    val device_id: String = "TERM-NAB-01",
+    val user_id: String = "admin",
+    val timestamp: Long = System.currentTimeMillis(),
+    val operation: String, // CHECKOUT, INVENTORY_SYNC, PRICE_UPDATE, USER_UPDATE
+    val entity_type: String, // SALE, PRODUCT, LEDGER, USER
+    val entity_id: String,
+    val status: String, // SUCCESS, PENDING, REJECTED, DUPLICATE, CONFLICT, FAILED
+    val error_code: String? = null,
+    val error_message: String? = null
+)
+
+@Entity(tableName = "security_events")
+data class SecurityEventEntity(
+    @PrimaryKey(autoGenerate = true)
+    val id: Long = 0,
+    val store_id: String = "STR-LBN-NAB-001",
+    val user_id: String = "anonymous",
+    val device_id: String = "TERM-NAB-01",
+    val timestamp: Long = System.currentTimeMillis(),
+    val event_type: String, // FAILED_LOGIN, UNAUTHORIZED_ACCESS, CROSS_STORE_ATTEMPT, SUSPICIOUS_PRICE_MODIFICATION, DUPLICATE_CHECKOUT
+    val severity: String, // INFO, WARNING, CRITICAL
+    val endpoint_or_action: String,
+    val result: String, // BLOCKED, ALLOWED, FLAGGED
+    val reason: String
+)
+
+data class StoreProfile(
+    val storeId: String = "STR-LBN-NAB-001",
+    val storeName: String = "Al-Makhzen Supermarket",
+    val region: String = "Nabatieh Area, South Lebanon",
+    val subscriptionStatus: String = "ACTIVE",
+    val currency: String = "USD / LBP",
+    val activeTerminalId: String = "TERM-NAB-01"
+)
+
+data class CategoryDemandItem(
+    val category: String,
+    val percentage: Int,
+    val unitSales: Int,
+    val revenue: Double
+)
+
+data class RegionalMarketInsight(
+    val regionName: String = "Nabatieh Area",
+    val totalTransactionsAnalyzed: Int = 0,
+    val averageTicketSize: Double = 0.0,
+    val categoryShare: List<CategoryDemandItem> = emptyList(),
+    val fastMovingProducts: List<String> = emptyList(),
+    val slowMovingProducts: List<String> = emptyList(),
+    val privacyNote: String = "Data aggregated and anonymized across regional supermarkets"
 )
 
 data class CartItem(

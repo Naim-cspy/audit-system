@@ -58,6 +58,7 @@ fun AnalyticsScreen(
     modifier: Modifier = Modifier
 ) {
     val prediction by adminViewModel.profitPrediction.collectAsState()
+    val regionalInsights by adminViewModel.regionalInsights.collectAsState()
 
     LazyColumn(
         modifier = modifier
@@ -251,6 +252,128 @@ fun AnalyticsScreen(
                         if (index < prediction.dates.size - 1) {
                             HorizontalDivider(modifier = Modifier.padding(vertical = 2.dp))
                         }
+                    }
+                }
+            }
+        }
+
+        // Section 7: Internal Aggregated Demographic & Purchasing Analytics
+        item {
+            ElevatedCard(
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().testTag("regional_analytics_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween,
+                        verticalAlignment = Alignment.CenterVertically
+                    ) {
+                        Row(verticalAlignment = Alignment.CenterVertically) {
+                            Icon(Icons.Default.Insights, contentDescription = null, tint = AccentBlue)
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text(
+                                text = "Regional Purchasing & Category Analytics",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(4.dp))
+                    Text(
+                        text = "Benchmark Area: ${regionalInsights.regionName} • ${regionalInsights.totalTransactionsAnalyzed} transactions analyzed",
+                        style = MaterialTheme.typography.bodySmall,
+                        color = Color.Gray
+                    )
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Average Basket / Ticket Size:", style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            text = "$${"%.2f".format(regionalInsights.averageTicketSize)}",
+                            fontWeight = FontWeight.Bold,
+                            color = SupermarketGreenDark
+                        )
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Text(
+                        text = "Demand by Product Category (% of regional volume):",
+                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    regionalInsights.categoryShare.forEach { item ->
+                        Column(modifier = Modifier.padding(vertical = 4.dp)) {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                horizontalArrangement = Arrangement.SpaceBetween
+                            ) {
+                                Text(item.category, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Bold))
+                                Text("${item.percentage}% (${item.unitSales} units, $${"%.2f".format(item.revenue)})", style = MaterialTheme.typography.bodySmall, color = AccentBlue)
+                            }
+                            Spacer(modifier = Modifier.height(4.dp))
+                            androidx.compose.material3.LinearProgressIndicator(
+                                progress = { (item.percentage.toFloat() / 100f).coerceIn(0f, 1f) },
+                                modifier = Modifier.fillMaxWidth().height(8.dp),
+                                color = SupermarketGreen,
+                                trackColor = Color.LightGray.copy(alpha = 0.3f)
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(14.dp))
+
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = SupermarketGreenLight),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Fast-Moving (High Velocity)", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = SupermarketGreenDark)
+                                Spacer(modifier = Modifier.height(4.dp))
+                                regionalInsights.fastMovingProducts.forEach {
+                                    Text("• $it", style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
+                                }
+                            }
+                        }
+
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = Color(0xFFFFF3E0)),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Column(modifier = Modifier.padding(10.dp)) {
+                                Text("Slow-Moving (High Stock)", style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold), color = Color(0xFFE65100))
+                                Spacer(modifier = Modifier.height(4.dp))
+                                regionalInsights.slowMovingProducts.forEach {
+                                    Text("• $it", style = MaterialTheme.typography.bodySmall, color = Color.DarkGray)
+                                }
+                            }
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(10.dp))
+
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.LightGray.copy(alpha = 0.2f),
+                        modifier = Modifier.fillMaxWidth()
+                    ) {
+                        Text(
+                            text = regionalInsights.privacyNote,
+                            style = MaterialTheme.typography.labelSmall,
+                            color = Color.DarkGray,
+                            modifier = Modifier.padding(8.dp)
+                        )
                     }
                 }
             }

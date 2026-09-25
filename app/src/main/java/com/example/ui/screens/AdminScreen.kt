@@ -35,6 +35,7 @@ import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
@@ -56,6 +57,7 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
 import com.example.data.model.AuditLogEntity
+import com.example.data.model.SyncEventEntity
 import com.example.data.model.UserEntity
 import com.example.ui.theme.AccentBlue
 import com.example.ui.theme.CriticalRed
@@ -76,11 +78,16 @@ fun AdminScreen(
     val currentUser by authViewModel.currentUser.collectAsState()
     val users by authViewModel.allUsers.collectAsState()
     val auditLogs by adminViewModel.auditLogs.collectAsState()
+    val syncEvents by adminViewModel.syncEvents.collectAsState()
+    val storeProfile = adminViewModel.storeProfile
     val scope = rememberCoroutineScope()
 
     var showAddUserDialog by remember { mutableStateOf(false) }
     var changePasswordUser by remember { mutableStateOf<String?>(null) }
     var exportCsvContent by remember { mutableStateOf<String?>(null) }
+    var exportJsonContent by remember { mutableStateOf<String?>(null) }
+    var showPrivacyPolicyDialog by remember { mutableStateOf(false) }
+    var selectedSyncFilter by remember { mutableStateOf("ALL") }
     var statusFeedback by remember { mutableStateOf<String?>(null) }
 
     // Role check: If not admin, show access denied
@@ -198,6 +205,27 @@ fun AdminScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
+                        Text("Store Tenant ID:", style = MaterialTheme.typography.bodyMedium)
+                        Text(storeProfile.storeId, fontWeight = FontWeight.Bold, color = SupermarketGreenDark)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Store / Region:", style = MaterialTheme.typography.bodyMedium)
+                        Text("${storeProfile.storeName} (${storeProfile.region})", fontWeight = FontWeight.Bold)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Text("Terminal ID:", style = MaterialTheme.typography.bodyMedium)
+                        Text(storeProfile.activeTerminalId, fontWeight = FontWeight.Bold, color = AccentBlue)
+                    }
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
                         Text("Database Engine:", style = MaterialTheme.typography.bodyMedium)
                         Text("SQLite / Room (WAL Mode)", fontWeight = FontWeight.Bold, color = SupermarketGreenDark)
                     }
@@ -205,31 +233,52 @@ fun AdminScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.SpaceBetween
                     ) {
-                        Text("Circuit Breaker / Cache:", style = MaterialTheme.typography.bodyMedium)
-                        Text("Active (L1 In-Memory)", fontWeight = FontWeight.Bold, color = AccentBlue)
+                        Text("Tenant Cloud State:", style = MaterialTheme.typography.bodyMedium)
+                        Text("ISOLATED / READY", fontWeight = FontWeight.Bold, color = SuccessGreen)
                     }
+                    Spacer(modifier = Modifier.height(14.dp))
+
                     Row(
                         modifier = Modifier.fillMaxWidth(),
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(8.dp)
                     ) {
-                        Text("Operating Status:", style = MaterialTheme.typography.bodyMedium)
-                        Text("READY / HEALTHY", fontWeight = FontWeight.Bold, color = SuccessGreen)
-                    }
-                    Spacer(modifier = Modifier.height(12.dp))
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    exportCsvContent = adminViewModel.getExportData()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).testTag("export_csv_btn")
+                        ) {
+                            Text("Export CSV")
+                        }
 
-                    Button(
-                        onClick = {
-                            scope.launch {
-                                exportCsvContent = adminViewModel.getExportData()
-                            }
-                        },
-                        colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                        Button(
+                            onClick = {
+                                scope.launch {
+                                    exportJsonContent = adminViewModel.getJsonBackup()
+                                }
+                            },
+                            colors = ButtonDefaults.buttonColors(containerColor = SupermarketGreen),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.weight(1f).testTag("export_json_btn")
+                        ) {
+                            Text("Export JSON")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    OutlinedButton(
+                        onClick = { showPrivacyPolicyDialog = true },
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().testTag("export_csv_btn")
+                        modifier = Modifier.fillMaxWidth().testTag("privacy_policy_btn")
                     ) {
-                        Icon(Icons.Default.Download, contentDescription = null)
-                        Spacer(modifier = Modifier.width(8.dp))
-                        Text("Synchronize & View CSV Backup")
+                        Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(16.dp))
+                        Spacer(modifier = Modifier.width(6.dp))
+                        Text("Cloud Privacy & Support Terms")
                     }
                 }
             }
@@ -284,6 +333,77 @@ fun AdminScreen(
         items(auditLogs, key = { it.id }) { log ->
             AuditLogRow(log = log)
         }
+
+        // Cloud Synchronization & Support Inspector (Section 4 & 5)
+        item {
+            Column(modifier = Modifier.padding(top = 8.dp)) {
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.SpaceBetween,
+                    verticalAlignment = Alignment.CenterVertically
+                ) {
+                    Text(
+                        text = "Cloud Sync & Support Inspector",
+                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                    Surface(
+                        shape = RoundedCornerShape(12.dp),
+                        color = SupermarketGreenLight
+                    ) {
+                        Text(
+                            text = "${syncEvents.size} Events Logged",
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = SupermarketGreenDark,
+                            modifier = Modifier.padding(horizontal = 8.dp, vertical = 2.dp)
+                        )
+                    }
+                }
+                Spacer(modifier = Modifier.height(6.dp))
+                Text(
+                    text = "Verify transaction replication states, investigate rejected/duplicate data",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+                Spacer(modifier = Modifier.height(8.dp))
+
+                // Sync filter chips
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    horizontalArrangement = Arrangement.spacedBy(6.dp)
+                ) {
+                    listOf("ALL", "SUCCESS", "FAILED", "PENDING").forEach { filter ->
+                        val isSelected = selectedSyncFilter == filter
+                        Surface(
+                            shape = RoundedCornerShape(16.dp),
+                            color = if (isSelected) SupermarketGreen else Color.LightGray.copy(alpha = 0.3f),
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            TextButton(
+                                onClick = { selectedSyncFilter = filter },
+                                contentPadding = androidx.compose.foundation.layout.PaddingValues(4.dp)
+                            ) {
+                                Text(
+                                    text = filter,
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = if (isSelected) Color.White else Color.DarkGray
+                                )
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        val filteredSyncs = when (selectedSyncFilter) {
+            "SUCCESS" -> syncEvents.filter { it.status == "SUCCESS" }
+            "FAILED" -> syncEvents.filter { it.status in listOf("FAILED", "REJECTED", "CONFLICT") }
+            "PENDING" -> syncEvents.filter { it.status == "PENDING" }
+            else -> syncEvents
+        }
+
+        items(filteredSyncs, key = { it.id }) { event ->
+            SyncEventRow(event = event)
+        }
     }
 
     // Add User Dialog
@@ -333,6 +453,105 @@ fun AdminScreen(
                     colors = ButtonDefaults.buttonColors(containerColor = SupermarketGreen)
                 ) {
                     Text("Done")
+                }
+            }
+        )
+    }
+
+    // JSON Cloud Backup View Dialog (Section 4 & 11)
+    if (exportJsonContent != null) {
+        AlertDialog(
+            onDismissRequest = { exportJsonContent = null },
+            title = { Text("Store Cloud JSON Backup (${storeProfile.storeId})") },
+            text = {
+                SelectionContainer {
+                    Text(
+                        text = exportJsonContent!!,
+                        style = MaterialTheme.typography.bodySmall.copy(fontFamily = FontFamily.Monospace),
+                        modifier = Modifier.height(320.dp)
+                    )
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { exportJsonContent = null },
+                    colors = ButtonDefaults.buttonColors(containerColor = SupermarketGreen)
+                ) {
+                    Text("Done")
+                }
+            }
+        )
+    }
+
+    // Cloud Privacy & Data Support Policy Dialog (Section 8)
+    if (showPrivacyPolicyDialog) {
+        AlertDialog(
+            onDismissRequest = { showPrivacyPolicyDialog = false },
+            title = { Text("SaaS Cloud Privacy & Support Disclosure") },
+            text = {
+                SelectionContainer {
+                    Column(
+                        modifier = Modifier.height(340.dp),
+                        verticalArrangement = Arrangement.spacedBy(10.dp)
+                    ) {
+                        Text(
+                            text = "1. Secure Cloud Infrastructure",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = SupermarketGreenDark
+                        )
+                        Text(
+                            text = "Store inventory, sales, financial ledgers, and audit logs are safely synchronized to tenant-isolated cloud storage.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        Text(
+                            text = "2. Support Access Defaults to Read-Only",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = SupermarketGreenDark
+                        )
+                        Text(
+                            text = "Authorized platform personnel may inspect store sync events and records strictly in read-only mode for technical support and troubleshooting. Customer data is never modified during support calls.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        Text(
+                            text = "3. Aggregated Regional Analytics",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = SupermarketGreenDark
+                        )
+                        Text(
+                            text = "Purchasing patterns and category turnover are analyzed across regions (e.g., Nabatieh Area) strictly in aggregated, anonymized form to benchmark store demand without exposing confidential trade data.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        Text(
+                            text = "4. Zero Third-Party Selling or Ad Sharing",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = SupermarketGreenDark
+                        )
+                        Text(
+                            text = "Customer and store operational records are NEVER sold or shared with third parties, data brokers, or advertising networks.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+
+                        Text(
+                            text = "5. Cryptographic Credential Protection",
+                            style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
+                            color = SupermarketGreenDark
+                        )
+                        Text(
+                            text = "User passwords and cryptographic salts are derived via PBKDF2 and strictly excluded from analytics and telemetry.",
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            },
+            confirmButton = {
+                Button(
+                    onClick = { showPrivacyPolicyDialog = false },
+                    colors = ButtonDefaults.buttonColors(containerColor = SupermarketGreen)
+                ) {
+                    Text("Understood")
                 }
             }
         )
@@ -558,4 +777,79 @@ fun ChangePasswordDialog(
             }
         }
     )
+}
+
+@Composable
+fun SyncEventRow(event: SyncEventEntity) {
+    val statusColor = when (event.status) {
+        "SUCCESS" -> SuccessGreen
+        "PENDING" -> AccentBlue
+        "REJECTED" -> Color(0xFF9C27B0)
+        else -> CriticalRed
+    }
+
+    ElevatedCard(
+        shape = RoundedCornerShape(6.dp),
+        modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp)
+    ) {
+        Column(modifier = Modifier.padding(10.dp)) {
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween,
+                verticalAlignment = Alignment.CenterVertically
+            ) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Surface(
+                        shape = RoundedCornerShape(4.dp),
+                        color = statusColor.copy(alpha = 0.15f)
+                    ) {
+                        Text(
+                            text = event.status,
+                            style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                            color = statusColor,
+                            modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                        )
+                    }
+                    Spacer(modifier = Modifier.width(8.dp))
+                    Text(
+                        text = event.operation,
+                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                    )
+                }
+
+                Text(
+                    text = event.sync_id,
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+            }
+
+            Spacer(modifier = Modifier.height(4.dp))
+
+            Row(
+                modifier = Modifier.fillMaxWidth(),
+                horizontalArrangement = Arrangement.SpaceBetween
+            ) {
+                Text(
+                    text = "${event.entity_type} • ID: ${event.entity_id}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.DarkGray
+                )
+                Text(
+                    text = java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(event.timestamp)),
+                    style = MaterialTheme.typography.labelSmall,
+                    color = Color.Gray
+                )
+            }
+
+            if (event.error_message != null) {
+                Spacer(modifier = Modifier.height(2.dp))
+                Text(
+                    text = "Reason: ${event.error_message}",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = CriticalRed
+                )
+            }
+        }
+    }
 }

@@ -9,11 +9,15 @@ import com.example.data.dao.AuditLogDao
 import com.example.data.dao.BalanceDao
 import com.example.data.dao.ProductDao
 import com.example.data.dao.SaleDao
+import com.example.data.dao.SecurityEventDao
+import com.example.data.dao.SyncEventDao
 import com.example.data.dao.UserDao
 import com.example.data.model.AuditLogEntity
 import com.example.data.model.BalanceEntity
 import com.example.data.model.ProductEntity
 import com.example.data.model.SaleEntity
+import com.example.data.model.SecurityEventEntity
+import com.example.data.model.SyncEventEntity
 import com.example.data.model.UserEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
@@ -25,9 +29,11 @@ import kotlinx.coroutines.launch
         SaleEntity::class,
         BalanceEntity::class,
         AuditLogEntity::class,
-        UserEntity::class
+        UserEntity::class,
+        SyncEventEntity::class,
+        SecurityEventEntity::class
     ],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -36,6 +42,8 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun balanceDao(): BalanceDao
     abstract fun auditLogDao(): AuditLogDao
     abstract fun userDao(): UserDao
+    abstract fun syncEventDao(): SyncEventDao
+    abstract fun securityEventDao(): SecurityEventDao
 
     companion object {
         @Volatile
@@ -116,6 +124,20 @@ abstract class AppDatabase : RoomDatabase() {
                 AuditLogEntity(
                     action = "SYSTEM_INIT",
                     details = "Supermarket POS & Audit Database initialized successfully"
+                )
+            )
+
+            // 6. Initial Cloud Sync State Event
+            db.syncEventDao().insert(
+                SyncEventEntity(
+                    sync_id = "SYNC-INIT-001",
+                    store_id = "STR-LBN-NAB-001",
+                    device_id = "TERM-NAB-01",
+                    user_id = "system",
+                    operation = "INITIAL_REPLICATION",
+                    entity_type = "STORE_SETTINGS",
+                    entity_id = "STR-LBN-NAB-001",
+                    status = "SUCCESS"
                 )
             )
         }

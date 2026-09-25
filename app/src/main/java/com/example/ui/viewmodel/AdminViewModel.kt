@@ -8,6 +8,10 @@ import com.example.data.model.BalanceEntity
 import com.example.data.model.FinancialSummary
 import com.example.data.model.ProductEntity
 import com.example.data.model.ProfitPrediction
+import com.example.data.model.RegionalMarketInsight
+import com.example.data.model.SecurityEventEntity
+import com.example.data.model.StoreProfile
+import com.example.data.model.SyncEventEntity
 import com.example.data.repository.SupermarketRepository
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
@@ -17,6 +21,8 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class AdminViewModel(private val repository: SupermarketRepository) : ViewModel() {
+
+    val storeProfile: StoreProfile = repository.currentStoreProfile
 
     val allProducts: StateFlow<List<ProductEntity>> = repository.allProducts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -30,11 +36,23 @@ class AdminViewModel(private val repository: SupermarketRepository) : ViewModel(
     val auditLogs: StateFlow<List<AuditLogEntity>> = repository.auditLogs
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val syncEvents: StateFlow<List<SyncEventEntity>> = repository.allSyncEvents
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val securityEvents: StateFlow<List<SecurityEventEntity>> = repository.allSecurityEvents
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
+
+    val failedSyncCount: StateFlow<Int> = repository.failedSyncCount
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), 0)
+
     private val _financialSummary = MutableStateFlow(FinancialSummary())
     val financialSummary: StateFlow<FinancialSummary> = _financialSummary.asStateFlow()
 
     private val _profitPrediction = MutableStateFlow(ProfitPrediction())
     val profitPrediction: StateFlow<ProfitPrediction> = _profitPrediction.asStateFlow()
+
+    private val _regionalInsights = MutableStateFlow(RegionalMarketInsight())
+    val regionalInsights: StateFlow<RegionalMarketInsight> = _regionalInsights.asStateFlow()
 
     private val _operationMessage = MutableStateFlow<String?>(null)
     val operationMessage: StateFlow<String?> = _operationMessage.asStateFlow()
@@ -51,6 +69,7 @@ class AdminViewModel(private val repository: SupermarketRepository) : ViewModel(
             try {
                 _financialSummary.value = repository.getFinancialSummary()
                 _profitPrediction.value = repository.calculateProfitPrediction()
+                _regionalInsights.value = repository.getRegionalMarketInsights()
             } catch (e: Exception) {
                 _isError.value = true
                 _operationMessage.value = "Failed to load metrics: ${e.message}"
@@ -142,6 +161,10 @@ class AdminViewModel(private val repository: SupermarketRepository) : ViewModel(
 
     suspend fun getExportData(): String {
         return repository.exportCsvSummary()
+    }
+
+    suspend fun getJsonBackup(): String {
+        return repository.exportJsonBackup()
     }
 }
 

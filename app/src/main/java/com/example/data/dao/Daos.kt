@@ -9,6 +9,8 @@ import com.example.data.model.AuditLogEntity
 import com.example.data.model.BalanceEntity
 import com.example.data.model.ProductEntity
 import com.example.data.model.SaleEntity
+import com.example.data.model.SecurityEventEntity
+import com.example.data.model.SyncEventEntity
 import com.example.data.model.UserEntity
 import kotlinx.coroutines.flow.Flow
 
@@ -115,4 +117,28 @@ interface UserDao {
 
     @Query("SELECT COUNT(*) FROM users")
     fun count(): Int
+}
+
+@Dao
+interface SyncEventDao {
+    @Query("SELECT * FROM sync_events ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentSyncEvents(limit: Int = 40): Flow<List<SyncEventEntity>>
+
+    @Query("SELECT * FROM sync_events WHERE status = :status ORDER BY timestamp DESC LIMIT :limit")
+    fun getByStatus(status: String, limit: Int = 40): Flow<List<SyncEventEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun insert(event: SyncEventEntity): Long
+
+    @Query("SELECT COUNT(*) FROM sync_events WHERE status = 'FAILED' OR status = 'REJECTED'")
+    fun getFailedCount(): Flow<Int>
+}
+
+@Dao
+interface SecurityEventDao {
+    @Query("SELECT * FROM security_events ORDER BY timestamp DESC LIMIT :limit")
+    fun getRecentSecurityEvents(limit: Int = 40): Flow<List<SecurityEventEntity>>
+
+    @Insert(onConflict = OnConflictStrategy.REPLACE)
+    fun insert(event: SecurityEventEntity): Long
 }

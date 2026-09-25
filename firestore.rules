@@ -1,0 +1,98 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // Helper functions for Authentication, Tenant Isolation & RBAC
+    function isAuthenticated() {
+      return request.auth != null;
+    }
+
+    function isStoreMember(storeId) {
+      return isAuthenticated() && request.auth.token.store_id == storeId;
+    }
+
+    function isPlatformAdmin() {
+      return isAuthenticated() && request.auth.token.platform_admin == true;
+    }
+
+    function hasStoreRole(storeId, role) {
+      return isStoreMember(storeId) && request.auth.token.role == role;
+    }
+
+    // ==================================================
+    // 1. TENANT STORES & ISOLATION
+    // ==================================================
+    match /stores/{storeId} {
+      // Store settings and metadata
+      allow read: if isStoreMember(storeId) || isPlatformAdmin();
+      allow update: if hasStoreRole(storeId, 'OWNER') || hasStoreRole(storeId, 'ADMIN');
+      allow create, delete: if isPlatformAdmin(); // New tenant stores provisioned by platform
+
+      // Products subcollection
+      match /products/{productId} {
+        allow read: if isStoreMember(storeId) || isPlatformAdmin();
+        allow write: if isStoreMember(storeId) &&
+                     (request.auth.token.role in ['OWNER', 'ADMIN', 'MANAGER', 'INVENTORY']);
+      }
+
+      // Sales subcollection (POS checkout transactions)
+      match /sales/{saleId} {
+        allow read: if isStoreMember(storeId) || isPlatformAdmin();
+        allow create: if isStoreMember(storeId); // Cashiers & above can register sales
+        allow update, delete: if false; // Immutable sales ledger
+      }
+
+      // Financial ledger entries
+      match /ledger/{ledgerId} {
+        allow read: if isStoreMember(storeId) &&
+                     (request.auth.token.role in ['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER']) ||
+                     isPlatformAdmin();
+        allow create: if isStoreMember(storeId) &&
+                      (request.auth.token.role in ['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER']);
+        allow update, delete: if false; // Immutable financial ledger
+      }
+
+      // Users and employees in this specific store
+      match /users/{userId} {
+        allow read: if isStoreMember(storeId) || isPlatformAdmin();
+        allow write: if isStoreMember(storeId) &&
+                     (request.auth.token.role in ['OWNER', 'ADMIN']);
+      }
+
+      // Store-specific Audit Logs (Append-only)
+      match /auditLogs/{logId} {
+        allow read: if isStoreMember(storeId) &&
+                     (request.auth.token.role in ['OWNER', 'ADMIN']) ||
+                     isPlatformAdmin();
+        allow create: if isStoreMember(storeId);
+        allow update, delete: if false; // Historical audit logs cannot be edited or deleted
+      }
+
+      // Sync Events (Replication & Diagnostic tracking)
+      match /syncEvents/{syncId} {
+        allow read: if isStoreMember(storeId) || isPlatformAdmin();
+        allow create: if isStoreMember(storeId);
+        allow update, delete: if false;
+      }
+    }
+
+    // ==================================================
+    // 2. PLATFORM ADMIN ACCESS AUDIT LOGGING
+    // ==================================================
+    match /admin_access_logs/{logId} {
+      allow read: if isPlatformAdmin();
+      allow create: if isPlatformAdmin() &&
+                    request.resource.data.keys().hasAll(['admin_id', 'store_id', 'timestamp', 'action', 'reason']);
+      allow update, delete: if false; // Append-only compliance log
+    }
+
+    // ==================================================
+    // 3. SECURITY EVENTS LOGGING
+    // ==================================================
+    match /security_events/{eventId} {
+      allow read: if isPlatformAdmin();
+      allow create: if isAuthenticated();
+      allow update, delete: if false;
+    }
+  }
+}
