@@ -8,6 +8,7 @@
     <uses-permission android:name="android.permission.VIBRATE" />
 
     <application
+        android:name=".SupermarketApp"
         android:allowBackup="false"
         android:usesCleartextTraffic="false"
         android:icon="@mipmap/ic_launcher"
