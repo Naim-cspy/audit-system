@@ -187,3 +187,9 @@ data class ProfitPrediction(
     val prediction90d: Double = 0.0,
     val prediction1yr: Double = 0.0
 )
+
+data class VerificationItem(
+    val title: String,
+    val status: String, // PASSED, FAILED, WARNING
+    val details: String
+)

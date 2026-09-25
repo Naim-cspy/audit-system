@@ -217,6 +217,47 @@ class FirestoreService(
         }
     }
 
+    // --- Cross-Tenant Isolation Verification ---
+
+    suspend fun getProduct(storeId: String, productId: String): Result<FirebaseProductDoc?> = suspendCancellableCoroutine { continuation ->
+        try {
+            firestore.collection("stores").document(storeId)
+                .collection("products").document(productId)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    if (snapshot != null && snapshot.exists()) {
+                        continuation.resume(Result.success(FirebaseProductDoc.fromMap(productId, snapshot.data ?: emptyMap())))
+                    } else {
+                        continuation.resume(Result.success(null))
+                    }
+                }
+                .addOnFailureListener { e -> continuation.resume(Result.failure(e)) }
+        } catch (e: Exception) {
+            continuation.resume(Result.failure(e))
+        }
+    }
+
+    suspend fun testCrossTenantRead(targetStoreId: String): Result<String> = suspendCancellableCoroutine { continuation ->
+        try {
+            firestore.collection("stores").document(targetStoreId)
+                .collection("products").limit(1)
+                .get()
+                .addOnSuccessListener {
+                    continuation.resume(Result.failure(SecurityException("TENANT ISOLATION FAILURE: Successfully accessed stores/$targetStoreId/products! Cross-tenant isolation must reject this with PERMISSION_DENIED.")))
+                }
+                .addOnFailureListener { exception ->
+                    val msg = exception.message ?: ""
+                    if (msg.contains("PERMISSION_DENIED", ignoreCase = true) || msg.contains("permission-denied", ignoreCase = true)) {
+                        continuation.resume(Result.success("ISOLATION VERIFIED: Request to stores/$targetStoreId/products was correctly rejected with PERMISSION_DENIED."))
+                    } else {
+                        continuation.resume(Result.failure(exception))
+                    }
+                }
+        } catch (e: Exception) {
+            continuation.resume(Result.failure(e))
+        }
+    }
+
     // --- Security Events (security_events/{eventId}) ---
 
     suspend fun recordSecurityEvent(event: FirebaseSyncEventDoc): Result<Unit> = suspendCancellableCoroutine { continuation ->

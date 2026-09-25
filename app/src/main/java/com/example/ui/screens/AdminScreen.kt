@@ -81,6 +81,8 @@ fun AdminScreen(
     val syncEvents by adminViewModel.syncEvents.collectAsState()
     val storeProfile by adminViewModel.storeProfileFlow.collectAsState()
     val isSyncing by adminViewModel.isSyncing.collectAsState()
+    val verificationResults by adminViewModel.verificationResults.collectAsState()
+    val isRunningVerification by adminViewModel.isRunningVerification.collectAsState()
     val scope = rememberCoroutineScope()
 
     var showAddUserDialog by remember { mutableStateOf(false) }
@@ -304,6 +306,105 @@ fun AdminScreen(
                         Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(16.dp))
                         Spacer(modifier = Modifier.width(6.dp))
                         Text("Cloud Privacy & Support Terms")
+                    }
+                }
+            }
+        }
+
+        // Firebase End-to-End Verification Card
+        item {
+            ElevatedCard(
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().testTag("firebase_verification_card")
+            ) {
+                Column(modifier = Modifier.padding(16.dp)) {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Icon(Icons.Default.Security, contentDescription = null, tint = AccentBlue)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Column {
+                            Text(
+                                text = "Firebase Verification Suite",
+                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Text(
+                                text = "Automated E2E check (Auth, Firestore Read/Write, Claims & Isolation)",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(12.dp))
+
+                    Button(
+                        onClick = { adminViewModel.runVerificationSuite() },
+                        enabled = !isRunningVerification,
+                        colors = ButtonDefaults.buttonColors(containerColor = AccentBlue),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("run_verification_suite_btn")
+                    ) {
+                        if (isRunningVerification) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Running Verification Checks...")
+                        } else {
+                            Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Run Live Verification Suite")
+                        }
+                    }
+
+                    if (verificationResults.isNotEmpty()) {
+                        Spacer(modifier = Modifier.height(12.dp))
+                        HorizontalDivider()
+                        Spacer(modifier = Modifier.height(10.dp))
+
+                        verificationResults.forEach { item ->
+                            val badgeColor = when (item.status) {
+                                "PASSED" -> SuccessGreen
+                                "FAILED" -> CriticalRed
+                                else -> Color(0xFFF57C00)
+                            }
+                            Card(
+                                colors = CardDefaults.cardColors(containerColor = badgeColor.copy(alpha = 0.1f)),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
+                            ) {
+                                Column(modifier = Modifier.padding(10.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = item.title,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                        )
+                                        Surface(
+                                            color = badgeColor,
+                                            shape = RoundedCornerShape(4.dp)
+                                        ) {
+                                            Text(
+                                                text = item.status,
+                                                color = Color.White,
+                                                style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.Bold),
+                                                modifier = Modifier.padding(horizontal = 6.dp, vertical = 2.dp)
+                                            )
+                                        }
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = item.details,
+                                        style = MaterialTheme.typography.bodySmall,
+                                        color = Color.DarkGray
+                                    )
+                                }
+                            }
+                        }
                     }
                 }
             }

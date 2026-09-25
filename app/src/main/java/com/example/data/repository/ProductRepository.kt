@@ -18,7 +18,7 @@ import kotlinx.coroutines.withContext
 class ProductRepository(
     private val productDao: ProductDao,
     private val auditLogDao: AuditLogDao,
-    private val firestoreService: FirestoreService = FirestoreService()
+    val firestoreService: FirestoreService = FirestoreService()
 ) {
 
     val allProducts: Flow<List<ProductEntity>> = productDao.getAllProducts()

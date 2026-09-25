@@ -27,8 +27,8 @@ import kotlinx.coroutines.withContext
 class AuthRepository(
     private val userDao: UserDao,
     private val auditLogDao: AuditLogDao,
-    private val authService: FirebaseAuthService = FirebaseAuthService(),
-    private val firestoreService: FirestoreService = FirestoreService()
+    val authService: FirebaseAuthService = FirebaseAuthService(),
+    val firestoreService: FirestoreService = FirestoreService()
 ) {
 
     private val _currentStoreProfile = MutableStateFlow(
@@ -68,28 +68,48 @@ class AuthRepository(
                 val uid = fbUser.uid
                 val email = fbUser.email ?: cleanIdentifier
 
-                // Resolve store membership from Firestore
-                val profileResult = firestoreService.getUserProfile(uid)
-                var userProfile = profileResult.getOrNull()
+                // 1. Extract trusted token claims from Firebase JWT
+                val claimsResult = authService.getIdTokenClaims(forceRefresh = true)
+                val claims = claimsResult.getOrNull() ?: emptyMap()
+                val claimStoreId = claims["store_id"] as? String
+                val claimRole = claims["role"] as? String
 
-                if (userProfile == null || userProfile.storeId.isBlank()) {
-                    // Create or associate initial membership doc if none exists
-                    val defaultStoreId = "STR-" + uid.take(6).uppercase()
-                    userProfile = FirebaseUserProfile(
-                        uid = uid,
-                        email = email,
-                        storeId = defaultStoreId,
-                        role = "admin",
-                        displayName = cleanIdentifier.substringBefore("@")
-                    )
-                    firestoreService.saveUserProfile(userProfile)
+                android.util.Log.i("AuthRepository", "Firebase login success UID: $uid")
+                if (!claimStoreId.isNullOrBlank()) {
+                    android.util.Log.i("AuthRepository", "Authenticated store: $claimStoreId")
+                    android.util.Log.i("AuthRepository", "Role: ${claimRole ?: "OWNER"}")
+                }
+
+                // Resolve store membership (trusted token claims take priority, then Firestore doc fallback)
+                val finalStoreId: String
+                val finalRole: String
+
+                if (!claimStoreId.isNullOrBlank()) {
+                    finalStoreId = claimStoreId
+                    finalRole = claimRole ?: "OWNER"
+                } else {
+                    val profileResult = firestoreService.getUserProfile(uid)
+                    var userProfile = profileResult.getOrNull()
+                    if (userProfile == null || userProfile.storeId.isBlank()) {
+                        val defaultStoreId = "STR-" + uid.take(6).uppercase()
+                        userProfile = FirebaseUserProfile(
+                            uid = uid,
+                            email = email,
+                            storeId = defaultStoreId,
+                            role = "OWNER",
+                            displayName = cleanIdentifier.substringBefore("@")
+                        )
+                        firestoreService.saveUserProfile(userProfile)
+                    }
+                    finalStoreId = userProfile.storeId
+                    finalRole = userProfile.role
                 }
 
                 // Load or sync store document
-                val storeDocResult = firestoreService.getStoreProfile(userProfile.storeId)
+                val storeDocResult = firestoreService.getStoreProfile(finalStoreId)
                 val storeDoc = storeDocResult.getOrNull() ?: FirebaseStoreDoc(
-                    storeId = userProfile.storeId,
-                    storeName = "${userProfile.displayName}'s Market",
+                    storeId = finalStoreId,
+                    storeName = "Supermarket Terminal ($finalStoreId)",
                     region = "Central District"
                 ).also { firestoreService.saveStoreProfile(it) }
 
@@ -100,8 +120,8 @@ class AuthRepository(
                     username = cleanIdentifier,
                     password_hash = "FIREBASE_MANAGED_UID_$uid",
                     salt = "FIREBASE_AUTH",
-                    role = userProfile.role,
-                    store_id = userProfile.storeId
+                    role = if (finalRole.equals("cashier", ignoreCase = true)) "cashier" else "admin",
+                    store_id = finalStoreId
                 )
                 val existingLocal = userDao.getByUsername(cleanIdentifier)
                 if (existingLocal == null) {
@@ -113,8 +133,8 @@ class AuthRepository(
                 auditLogDao.insert(
                     AuditLogEntity(
                         action = "FIREBASE_LOGIN_SUCCESS",
-                        details = "User '$cleanIdentifier' signed in via Firebase Auth (UID: $uid, Store: ${userProfile.storeId})",
-                        store_id = userProfile.storeId,
+                        details = "User '$cleanIdentifier' signed in via Firebase Auth (UID: $uid, Store: $finalStoreId, Role: $finalRole)",
+                        store_id = finalStoreId,
                         user_id = uid
                     )
                 )

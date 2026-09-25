@@ -69,6 +69,26 @@ class FirebaseAuthService(
         }
     }
 
+    suspend fun getIdTokenClaims(forceRefresh: Boolean = false): Result<Map<String, Any>> = suspendCancellableCoroutine { continuation ->
+        val user = currentUser
+        if (user == null) {
+            continuation.resume(Result.failure(IllegalStateException("No authenticated user")))
+            return@suspendCancellableCoroutine
+        }
+        try {
+            user.getIdToken(forceRefresh)
+                .addOnSuccessListener { tokenResult ->
+                    val claims = tokenResult.claims
+                    continuation.resume(Result.success(claims))
+                }
+                .addOnFailureListener { exception ->
+                    continuation.resume(Result.failure(exception))
+                }
+        } catch (e: Exception) {
+            continuation.resume(Result.failure(e))
+        }
+    }
+
     fun signOut() {
         try {
             auth.signOut()
