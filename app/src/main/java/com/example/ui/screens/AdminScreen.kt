@@ -79,7 +79,8 @@ fun AdminScreen(
     val users by authViewModel.allUsers.collectAsState()
     val auditLogs by adminViewModel.auditLogs.collectAsState()
     val syncEvents by adminViewModel.syncEvents.collectAsState()
-    val storeProfile = adminViewModel.storeProfile
+    val storeProfile by adminViewModel.storeProfileFlow.collectAsState()
+    val isSyncing by adminViewModel.isSyncing.collectAsState()
     val scope = rememberCoroutineScope()
 
     var showAddUserDialog by remember { mutableStateOf(false) }
@@ -266,6 +267,30 @@ fun AdminScreen(
                             modifier = Modifier.weight(1f).testTag("export_json_btn")
                         ) {
                             Text("Export JSON")
+                        }
+                    }
+
+                    Spacer(modifier = Modifier.height(8.dp))
+
+                    Button(
+                        onClick = { adminViewModel.triggerCloudSync() },
+                        enabled = !isSyncing,
+                        colors = ButtonDefaults.buttonColors(containerColor = SupermarketGreenDark),
+                        shape = RoundedCornerShape(8.dp),
+                        modifier = Modifier.fillMaxWidth().testTag("trigger_cloud_sync_btn")
+                    ) {
+                        if (isSyncing) {
+                            androidx.compose.material3.CircularProgressIndicator(
+                                color = Color.White,
+                                strokeWidth = 2.dp,
+                                modifier = Modifier.size(18.dp)
+                            )
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Syncing with Cloud...")
+                        } else {
+                            Icon(Icons.Default.Storage, contentDescription = null, modifier = Modifier.size(18.dp))
+                            Spacer(modifier = Modifier.width(8.dp))
+                            Text("Sync with Firestore (${storeProfile.storeId})")
                         }
                     }
 

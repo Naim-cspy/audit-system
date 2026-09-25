@@ -22,7 +22,12 @@ import kotlinx.coroutines.launch
 
 class AdminViewModel(private val repository: SupermarketRepository) : ViewModel() {
 
-    val storeProfile: StoreProfile = repository.currentStoreProfile
+    val storeProfile: StoreProfile
+        get() = repository.currentStoreProfile
+
+    val storeProfileFlow: StateFlow<StoreProfile> = repository.currentStoreProfileFlow
+
+    val isSyncing: StateFlow<Boolean> = repository.isSyncing
 
     val allProducts: StateFlow<List<ProductEntity>> = repository.allProducts
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -151,6 +156,20 @@ class AdminViewModel(private val repository: SupermarketRepository) : ViewModel(
             } else {
                 _isError.value = true
                 _operationMessage.value = res.exceptionOrNull()?.message ?: "Failed to delete product"
+            }
+        }
+    }
+
+    fun triggerCloudSync() {
+        viewModelScope.launch {
+            val res = repository.triggerCloudSync()
+            if (res.isSuccess) {
+                _isError.value = false
+                _operationMessage.value = res.getOrNull() ?: "Cloud sync completed"
+                refreshAnalytics()
+            } else {
+                _isError.value = true
+                _operationMessage.value = res.exceptionOrNull()?.message ?: "Cloud sync failed"
             }
         }
     }

@@ -65,6 +65,7 @@ fun LoginScreen(
 ) {
     val loginError by authViewModel.loginError.collectAsState()
     val allUsers by authViewModel.allUsers.collectAsState()
+    val isLoading by authViewModel.isLoading.collectAsState()
 
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
@@ -182,7 +183,8 @@ fun LoginScreen(
                         username = it
                         if (loginError != null) authViewModel.clearError()
                     },
-                    label = { Text("Username") },
+                    label = { Text("Email or Username") },
+                    placeholder = { Text("admin@store.com or admin") },
                     leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
@@ -213,6 +215,7 @@ fun LoginScreen(
 
                 Button(
                     onClick = { authViewModel.login(username, password) },
+                    enabled = !isLoading,
                     colors = ButtonDefaults.buttonColors(containerColor = SupermarketGreen),
                     shape = RoundedCornerShape(10.dp),
                     modifier = Modifier
@@ -220,10 +223,18 @@ fun LoginScreen(
                         .height(48.dp)
                         .testTag("login_submit_btn")
                 ) {
-                    Text(
-                        text = "Sign In",
-                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
-                    )
+                    if (isLoading) {
+                        androidx.compose.material3.CircularProgressIndicator(
+                            color = Color.White,
+                            strokeWidth = 2.dp,
+                            modifier = Modifier.size(22.dp)
+                        )
+                    } else {
+                        Text(
+                            text = "Sign In",
+                            style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
+                        )
+                    }
                 }
 
                 if (BuildConfig.DEBUG) {
@@ -289,7 +300,7 @@ private fun InitialAdminDialog(
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
                 Text(
-                    text = "Configure the primary administrator account for this system. Credentials will be securely derived with PBKDF2.",
+                    text = "Configure the primary administrator account for this system. Use an email address for Firebase Cloud Authentication or a username for local offline credentials.",
                     style = MaterialTheme.typography.bodySmall,
                     color = Color.Gray
                 )
@@ -303,7 +314,8 @@ private fun InitialAdminDialog(
                 OutlinedTextField(
                     value = adminUsername,
                     onValueChange = { adminUsername = it },
-                    label = { Text("Admin Username") },
+                    label = { Text("Admin Email or Username") },
+                    placeholder = { Text("admin@store.com") },
                     singleLine = true,
                     modifier = Modifier.fillMaxWidth().testTag("setup_admin_username")
                 )

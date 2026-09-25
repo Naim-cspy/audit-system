@@ -1,6 +1,7 @@
 package com.example.data.dao
 
 import androidx.room.Dao
+import androidx.room.Delete
 import androidx.room.Insert
 import androidx.room.OnConflictStrategy
 import androidx.room.Query
@@ -43,6 +44,9 @@ interface ProductDao {
     @Query("DELETE FROM inventory WHERE UPPER(product_id) = UPPER(:productId)")
     fun deleteById(productId: String): Int
 
+    @Delete
+    fun delete(product: ProductEntity): Int
+
     @Query("SELECT COUNT(*) FROM inventory")
     fun count(): Int
 }
@@ -61,6 +65,9 @@ interface SaleDao {
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insertAll(sales: List<SaleEntity>): List<Long>
 
+    @Update
+    fun update(sale: SaleEntity): Int
+
     @Query("SELECT COUNT(*) FROM sales")
     fun count(): Int
 }
@@ -76,11 +83,17 @@ interface BalanceDao {
     @Query("SELECT * FROM balance_history ORDER BY id DESC LIMIT 1")
     fun getLatest(): BalanceEntity?
 
+    @Query("SELECT * FROM balance_history ORDER BY id DESC LIMIT 1")
+    fun getLatestBalance(): BalanceEntity?
+
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insert(balance: BalanceEntity): Long
 
     @Insert(onConflict = OnConflictStrategy.REPLACE)
     fun insertAll(balances: List<BalanceEntity>): List<Long>
+
+    @Update
+    fun update(balance: BalanceEntity): Int
 
     @Query("SELECT COUNT(*) FROM balance_history")
     fun count(): Int

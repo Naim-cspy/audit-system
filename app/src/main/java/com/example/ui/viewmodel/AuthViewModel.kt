@@ -3,6 +3,7 @@ package com.example.ui.viewmodel
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
+import com.example.data.model.StoreProfile
 import com.example.data.model.UserEntity
 import com.example.data.repository.SupermarketRepository
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -19,8 +20,13 @@ class AuthViewModel(private val repository: SupermarketRepository) : ViewModel()
     private val _currentUser = MutableStateFlow<UserEntity?>(null)
     val currentUser: StateFlow<UserEntity?> = _currentUser.asStateFlow()
 
+    val currentStoreProfile: StateFlow<StoreProfile> = repository.currentStoreProfileFlow
+
     private val _loginError = MutableStateFlow<String?>(null)
     val loginError: StateFlow<String?> = _loginError.asStateFlow()
+
+    private val _isLoading = MutableStateFlow(false)
+    val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     val allUsers: StateFlow<List<UserEntity>> = repository.allUsers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
@@ -29,38 +35,51 @@ class AuthViewModel(private val repository: SupermarketRepository) : ViewModel()
         .map { it.isNotEmpty() }
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
 
-    fun login(username: String, passwordPlain: String) {
+    fun login(identifier: String, passwordPlain: String) {
         viewModelScope.launch {
             _loginError.value = null
-            if (username.isBlank() || passwordPlain.isBlank()) {
-                _loginError.value = "Please enter both username and password"
+            if (identifier.isBlank() || passwordPlain.isBlank()) {
+                _loginError.value = "Please enter both identifier (email/username) and password"
                 return@launch
             }
-            val user = repository.verifyLogin(username, passwordPlain)
-            if (user != null) {
-                _currentUser.value = user
-            } else {
-                _loginError.value = "Invalid username or password"
+            _isLoading.value = true
+            try {
+                val res = repository.authRepository.login(identifier, passwordPlain)
+                if (res.isSuccess) {
+                    _currentUser.value = res.getOrThrow()
+                } else {
+                    _loginError.value = res.exceptionOrNull()?.message ?: "Invalid credentials or account not found"
+                }
+            } catch (e: Exception) {
+                _loginError.value = e.message ?: "Authentication failed"
+            } finally {
+                _isLoading.value = false
             }
         }
     }
 
-    fun registerInitialAdmin(username: String, passwordPlain: String, onComplete: (Boolean, String?) -> Unit) {
+    fun registerInitialAdmin(usernameOrEmail: String, passwordPlain: String, onComplete: (Boolean, String?) -> Unit) {
         viewModelScope.launch {
             _loginError.value = null
-            val res = repository.createInitialAdmin(username, passwordPlain)
-            if (res.isSuccess) {
-                _currentUser.value = res.getOrNull()
-                onComplete(true, null)
-            } else {
-                val err = res.exceptionOrNull()?.message ?: "Failed to create administrator account"
-                _loginError.value = err
-                onComplete(false, err)
+            _isLoading.value = true
+            try {
+                val res = repository.createInitialAdmin(usernameOrEmail, passwordPlain)
+                if (res.isSuccess) {
+                    _currentUser.value = res.getOrNull()
+                    onComplete(true, null)
+                } else {
+                    val err = res.exceptionOrNull()?.message ?: "Failed to create administrator account"
+                    _loginError.value = err
+                    onComplete(false, err)
+                }
+            } finally {
+                _isLoading.value = false
             }
         }
     }
 
     fun logout() {
+        repository.logout()
         _currentUser.value = null
     }
 
