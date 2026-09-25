@@ -117,11 +117,11 @@ fun AdminScreen(
                     )
                     Spacer(modifier = Modifier.height(16.dp))
                     Button(
-                        onClick = { authViewModel.quickLoginAs("admin") },
+                        onClick = { authViewModel.logout() },
                         colors = ButtonDefaults.buttonColors(containerColor = SupermarketGreen),
                         modifier = Modifier.testTag("switch_to_admin_btn")
                     ) {
-                        Text("Switch to Admin (Demo)")
+                        Text("Sign Out to Switch Account")
                     }
                 }
             }

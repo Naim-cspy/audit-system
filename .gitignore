@@ -1,44 +1,48 @@
-# Python
-__pycache__/
-*.py[cod]
-*$py.class
-*.so
-.Python
-build/
-develop-eggs/
-dist/
-downloads/
-eggs/
-.eggs/
-lib/
-lib64/
-parts/
-sdist/
-var/
-wheels/
-*.egg-info/
-.installed.cfg
-*.egg
+# Android & Gradle
+*.iml
+.gradle/
+/local.properties
+/.idea/
+.DS_Store
+/build
+/app/build
+captures/
+.externalNativeBuild
+.cxx
+download_apk/
+.build-outputs/
 
-# Virtual Environments
-venv/
-.venv/
-env/
-ENV/
+# Secrets & Environment
+.env
+.env.*
+!.env.example
+secrets.properties
+private_keys/
+*.pem
+*.key
+*.p12
+
+# Release signing keys & keystores (never commit production keystores)
+*.jks
+*.keystore
+!debug.keystore
+
+# Android App Bundles and APKs
+*.apk
+*.ap_
+*.aab
 
 # Database temporary files (WAL mode)
 *.db
 *.db-wal
 *.db-shm
 
-# IDE & Editors
-.vscode/
-.idea/
-*.swp
-*.swo
+# Python & Node (if scripts present)
+__pycache__/
+*.py[cod]
+node_modules/
 
 # OS files
 Thumbs.db
 ehthumbs.db
 Desktop.ini
-.DS_Store

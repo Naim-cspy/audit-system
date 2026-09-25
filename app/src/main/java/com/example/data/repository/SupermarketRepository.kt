@@ -11,6 +11,7 @@ import com.example.data.model.Receipt
 import com.example.data.model.ReceiptItem
 import com.example.data.model.SaleEntity
 import com.example.data.model.UserEntity
+import com.example.data.security.PasswordSecurity
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
@@ -398,28 +399,69 @@ class SupermarketRepository(private val db: AppDatabase) {
     }
 
     suspend fun verifyLogin(username: String, passwordPlain: String): UserEntity? = withContext(Dispatchers.IO) {
-        val user = userDao.getByUsername(username.trim()) ?: return@withContext null
-        val hash = AppDatabase.sha256(passwordPlain.trim())
-        if (user.password_hash.equals(hash, ignoreCase = true) || user.password_hash == passwordPlain) {
+        val cleanUser = username.trim()
+        val cleanPass = passwordPlain.trim()
+        if (cleanUser.isEmpty() || cleanPass.isEmpty()) return@withContext null
+
+        val user = userDao.getByUsername(cleanUser) ?: return@withContext null
+        if (PasswordSecurity.verifyPassword(cleanPass, user.password_hash, user.salt)) {
             user
         } else {
             null
         }
     }
 
+    suspend fun createInitialAdmin(username: String, passwordPlain: String): Result<UserEntity> = withContext(Dispatchers.IO) {
+        val cleanUser = username.trim()
+        val cleanPass = passwordPlain.trim()
+        if (cleanUser.isEmpty() || cleanPass.isEmpty()) {
+            return@withContext Result.failure(IllegalArgumentException("Username and password cannot be empty"))
+        }
+        if (cleanPass.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("Password must be at least 6 characters"))
+        }
+        val existing = userDao.getByUsername(cleanUser)
+        if (existing != null) {
+            return@withContext Result.failure(IllegalArgumentException("Account '$cleanUser' already exists"))
+        }
+        val salt = PasswordSecurity.generateSalt()
+        val hash = PasswordSecurity.hashPassword(cleanPass, salt)
+        val adminUser = UserEntity(
+            username = cleanUser,
+            password_hash = hash,
+            salt = salt,
+            role = "admin"
+        )
+        val id = userDao.insert(adminUser)
+        auditLogDao.insert(
+            AuditLogEntity(
+                action = "INITIAL_ADMIN_PROVISIONED",
+                details = "Administrator account '$cleanUser' initialized"
+            )
+        )
+        Result.success(adminUser.copy(id = id.toInt()))
+    }
+
     suspend fun addUser(username: String, passwordPlain: String, role: String): Result<Unit> = withContext(Dispatchers.IO) {
         val cleanUser = username.trim()
-        if (cleanUser.isEmpty() || passwordPlain.isEmpty()) {
+        val cleanPass = passwordPlain.trim()
+        if (cleanUser.isEmpty() || cleanPass.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("Username and password cannot be empty"))
+        }
+        if (cleanPass.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("Password must be at least 6 characters"))
         }
         val existing = userDao.getByUsername(cleanUser)
         if (existing != null) {
             return@withContext Result.failure(IllegalArgumentException("Username $cleanUser already exists"))
         }
+        val salt = PasswordSecurity.generateSalt()
+        val hash = PasswordSecurity.hashPassword(cleanPass, salt)
         userDao.insert(
             UserEntity(
                 username = cleanUser,
-                password_hash = AppDatabase.sha256(passwordPlain.trim()),
+                password_hash = hash,
+                salt = salt,
                 role = if (role.lowercase() == "admin") "admin" else "cashier"
             )
         )
@@ -434,8 +476,16 @@ class SupermarketRepository(private val db: AppDatabase) {
 
     suspend fun deleteUser(username: String): Result<Unit> = withContext(Dispatchers.IO) {
         val cleanUser = username.trim()
-        if (cleanUser.equals("admin", ignoreCase = true)) {
-            return@withContext Result.failure(IllegalArgumentException("Root admin account cannot be deleted"))
+        val userToDelete = userDao.getByUsername(cleanUser)
+            ?: return@withContext Result.failure(IllegalArgumentException("User $cleanUser does not exist"))
+        
+        // Prevent deleting the last remaining admin
+        if (userToDelete.role == "admin") {
+            val allUsers = userDao.getAllUsers().first()
+            val adminCount = allUsers.count { it.role == "admin" }
+            if (adminCount <= 1) {
+                return@withContext Result.failure(IllegalArgumentException("Cannot delete the only administrator account"))
+            }
         }
         userDao.deleteByUsername(cleanUser)
         auditLogDao.insert(
@@ -449,10 +499,16 @@ class SupermarketRepository(private val db: AppDatabase) {
 
     suspend fun changePassword(username: String, newPasswordPlain: String): Result<Unit> = withContext(Dispatchers.IO) {
         val cleanUser = username.trim()
-        if (newPasswordPlain.trim().isEmpty()) {
-            return@withContext Result.failure(IllegalArgumentException("Password cannot be empty"))
+        val cleanPass = newPasswordPlain.trim()
+        if (cleanPass.length < 6) {
+            return@withContext Result.failure(IllegalArgumentException("New password must be at least 6 characters"))
         }
-        userDao.updatePassword(cleanUser, AppDatabase.sha256(newPasswordPlain.trim()))
+        userDao.getByUsername(cleanUser)
+            ?: return@withContext Result.failure(IllegalArgumentException("User $cleanUser not found"))
+
+        val salt = PasswordSecurity.generateSalt()
+        val hash = PasswordSecurity.hashPassword(cleanPass, salt)
+        userDao.updatePassword(cleanUser, hash, salt)
         auditLogDao.insert(
             AuditLogEntity(
                 action = "CHANGE_PASSWORD",

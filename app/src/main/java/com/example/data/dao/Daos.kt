@@ -110,8 +110,8 @@ interface UserDao {
     @Query("DELETE FROM users WHERE LOWER(username) = LOWER(:username)")
     fun deleteByUsername(username: String): Int
 
-    @Query("UPDATE users SET password_hash = :newHash WHERE LOWER(username) = LOWER(:username)")
-    fun updatePassword(username: String, newHash: String): Int
+    @Query("UPDATE users SET password_hash = :newHash, salt = :newSalt WHERE LOWER(username) = LOWER(:username)")
+    fun updatePassword(username: String, newHash: String, newSalt: String): Int
 
     @Query("SELECT COUNT(*) FROM users")
     fun count(): Int

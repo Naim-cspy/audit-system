@@ -58,6 +58,7 @@ data class UserEntity(
     val id: Int = 0,
     val username: String,
     val password_hash: String,
+    val salt: String = "",
     val role: String = "cashier", // "admin" or "cashier"
     val created_at: Long = System.currentTimeMillis()
 )

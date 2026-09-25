@@ -9,15 +9,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.SharingStarted
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 
 class AuthViewModel(private val repository: SupermarketRepository) : ViewModel() {
 
-    // Default to admin so user immediately sees full app capabilities
-    private val _currentUser = MutableStateFlow<UserEntity?>(
-        UserEntity(id = 1, username = "admin", password_hash = "", role = "admin")
-    )
+    // Authentication requires explicit login (no automatic bypass/admin default)
+    private val _currentUser = MutableStateFlow<UserEntity?>(null)
     val currentUser: StateFlow<UserEntity?> = _currentUser.asStateFlow()
 
     private val _loginError = MutableStateFlow<String?>(null)
@@ -26,9 +25,17 @@ class AuthViewModel(private val repository: SupermarketRepository) : ViewModel()
     val allUsers: StateFlow<List<UserEntity>> = repository.allUsers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
+    val hasUsers: StateFlow<Boolean> = repository.allUsers
+        .map { it.isNotEmpty() }
+        .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), true)
+
     fun login(username: String, passwordPlain: String) {
         viewModelScope.launch {
             _loginError.value = null
+            if (username.isBlank() || passwordPlain.isBlank()) {
+                _loginError.value = "Please enter both username and password"
+                return@launch
+            }
             val user = repository.verifyLogin(username, passwordPlain)
             if (user != null) {
                 _currentUser.value = user
@@ -38,18 +45,17 @@ class AuthViewModel(private val repository: SupermarketRepository) : ViewModel()
         }
     }
 
-    fun quickLoginAs(username: String) {
+    fun registerInitialAdmin(username: String, passwordPlain: String, onComplete: (Boolean, String?) -> Unit) {
         viewModelScope.launch {
-            val user = repository.verifyLogin(username, if (username == "admin") "admin123" else if (username == "john") "password1" else "securePass99")
-            if (user != null) {
-                _currentUser.value = user
+            _loginError.value = null
+            val res = repository.createInitialAdmin(username, passwordPlain)
+            if (res.isSuccess) {
+                _currentUser.value = res.getOrNull()
+                onComplete(true, null)
             } else {
-                // Fallback direct entity set
-                _currentUser.value = UserEntity(
-                    username = username,
-                    password_hash = "",
-                    role = if (username == "admin") "admin" else "cashier"
-                )
+                val err = res.exceptionOrNull()?.message ?: "Failed to create administrator account"
+                _loginError.value = err
+                onComplete(false, err)
             }
         }
     }

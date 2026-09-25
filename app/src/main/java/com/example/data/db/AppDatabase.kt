@@ -18,7 +18,6 @@ import com.example.data.model.UserEntity
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
-import java.security.MessageDigest
 
 @Database(
     entities = [
@@ -28,7 +27,7 @@ import java.security.MessageDigest
         AuditLogEntity::class,
         UserEntity::class
     ],
-    version = 1,
+    version = 2,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -42,11 +41,6 @@ abstract class AppDatabase : RoomDatabase() {
         @Volatile
         private var INSTANCE: AppDatabase? = null
 
-        fun sha256(input: String): String {
-            val bytes = MessageDigest.getInstance("SHA-256").digest(input.toByteArray())
-            return bytes.joinToString("") { "%02x".format(it) }
-        }
-
         fun getDatabase(context: Context, scope: CoroutineScope): AppDatabase {
             return INSTANCE ?: synchronized(this) {
                 val instance = Room.databaseBuilder(
@@ -54,6 +48,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "supermarket_audit.db"
                 )
+                    .fallbackToDestructiveMigration()
                     .addCallback(DatabaseCallback(scope))
                     .build()
                 INSTANCE = instance
@@ -75,17 +70,10 @@ abstract class AppDatabase : RoomDatabase() {
         }
 
         suspend fun seedDatabase(db: AppDatabase) {
-            // 1. Seed Users
-            if (db.userDao().count() == 0) {
-                val users = listOf(
-                    UserEntity(username = "admin", password_hash = sha256("admin123"), role = "admin"),
-                    UserEntity(username = "john", password_hash = sha256("password1"), role = "cashier"),
-                    UserEntity(username = "sarah", password_hash = sha256("securePass99"), role = "cashier")
-                )
-                db.userDao().insertAll(users)
-            }
+            // Note: In Phase 1 hardcoded demo credentials are permanently removed.
+            // User accounts are now created securely with PBKDF2 cryptographic hashing.
 
-            // 2. Seed Inventory
+            // 1. Seed Inventory
             if (db.productDao().count() == 0) {
                 val initialProducts = listOf(
                     ProductEntity("P001", "Wireless Mouse", 25.99, 4892, 304, "2026-09-21", "2026-05-15", "Electronics"),

@@ -14,13 +14,12 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
-import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
-import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.AdminPanelSettings
 import androidx.compose.material.icons.filled.Lock
 import androidx.compose.material.icons.filled.Person
-import androidx.compose.material.icons.filled.PointOfSale
+import androidx.compose.material.icons.filled.Security
 import androidx.compose.material3.Button
 import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.Card
@@ -31,7 +30,9 @@ import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
@@ -46,10 +47,11 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.text.font.FontWeight
-import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.unit.dp
+import com.example.BuildConfig
 import com.example.R
+import com.example.ui.theme.AccentBlue
 import com.example.ui.theme.CriticalRed
 import com.example.ui.theme.SupermarketGreen
 import com.example.ui.theme.SupermarketGreenDark
@@ -62,9 +64,13 @@ fun LoginScreen(
     modifier: Modifier = Modifier
 ) {
     val loginError by authViewModel.loginError.collectAsState()
+    val allUsers by authViewModel.allUsers.collectAsState()
 
-    var username by remember { mutableStateOf("admin") }
-    var password by remember { mutableStateOf("admin123") }
+    var username by remember { mutableStateOf("") }
+    var password by remember { mutableStateOf("") }
+    var showInitialSetupDialog by remember { mutableStateOf(false) }
+
+    val isFirstTimeSetup = allUsers.isEmpty()
 
     Box(
         modifier = modifier
@@ -110,11 +116,56 @@ fun LoginScreen(
 
                 Spacer(modifier = Modifier.height(20.dp))
 
+                if (isFirstTimeSetup) {
+                    Card(
+                        colors = CardDefaults.cardColors(containerColor = SupermarketGreenLight),
+                        shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 16.dp)
+                    ) {
+                        Column(modifier = Modifier.padding(14.dp)) {
+                            Row(verticalAlignment = Alignment.CenterVertically) {
+                                Icon(
+                                    Icons.Default.AdminPanelSettings,
+                                    contentDescription = null,
+                                    tint = SupermarketGreenDark
+                                )
+                                Spacer(modifier = Modifier.width(8.dp))
+                                Text(
+                                    text = "Initial System Provisioning",
+                                    style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
+                                    color = SupermarketGreenDark
+                                )
+                            }
+                            Spacer(modifier = Modifier.height(6.dp))
+                            Text(
+                                text = "No accounts configured yet. Create the initial administrator credentials to begin.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = SupermarketGreenDark
+                            )
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Button(
+                                onClick = { showInitialSetupDialog = true },
+                                colors = ButtonDefaults.buttonColors(containerColor = SupermarketGreen),
+                                shape = RoundedCornerShape(8.dp),
+                                modifier = Modifier
+                                    .fillMaxWidth()
+                                    .testTag("setup_admin_btn")
+                            ) {
+                                Text("Provision Administrator Account")
+                            }
+                        }
+                    }
+                }
+
                 if (loginError != null) {
                     Card(
                         colors = CardDefaults.cardColors(containerColor = MaterialTheme.colorScheme.errorContainer),
                         shape = RoundedCornerShape(8.dp),
-                        modifier = Modifier.fillMaxWidth().padding(bottom = 12.dp)
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(bottom = 12.dp)
                     ) {
                         Text(
                             text = loginError!!,
@@ -127,25 +178,35 @@ fun LoginScreen(
 
                 OutlinedTextField(
                     value = username,
-                    onValueChange = { username = it },
+                    onValueChange = {
+                        username = it
+                        if (loginError != null) authViewModel.clearError()
+                    },
                     label = { Text("Username") },
                     leadingIcon = { Icon(Icons.Default.Person, contentDescription = null) },
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("login_username_input")
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("login_username_input")
                 )
 
                 Spacer(modifier = Modifier.height(12.dp))
 
                 OutlinedTextField(
                     value = password,
-                    onValueChange = { password = it },
+                    onValueChange = {
+                        password = it
+                        if (loginError != null) authViewModel.clearError()
+                    },
                     label = { Text("Password") },
                     leadingIcon = { Icon(Icons.Default.Lock, contentDescription = null) },
                     visualTransformation = PasswordVisualTransformation(),
                     singleLine = true,
                     shape = RoundedCornerShape(10.dp),
-                    modifier = Modifier.fillMaxWidth().testTag("login_password_input")
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .testTag("login_password_input")
                 )
 
                 Spacer(modifier = Modifier.height(20.dp))
@@ -165,44 +226,133 @@ fun LoginScreen(
                     )
                 }
 
-                Spacer(modifier = Modifier.height(24.dp))
-                HorizontalDivider()
-                Spacer(modifier = Modifier.height(16.dp))
+                if (BuildConfig.DEBUG) {
+                    Spacer(modifier = Modifier.height(20.dp))
+                    HorizontalDivider()
+                    Spacer(modifier = Modifier.height(12.dp))
 
-                Text(
-                    text = "Quick Demo Profiles:",
-                    style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.Bold),
-                    color = Color.Gray
-                )
-
-                Spacer(modifier = Modifier.height(10.dp))
-
-                Row(
-                    modifier = Modifier.fillMaxWidth(),
-                    horizontalArrangement = Arrangement.spacedBy(8.dp)
-                ) {
-                    OutlinedButton(
-                        onClick = { authViewModel.quickLoginAs("admin") },
-                        modifier = Modifier.weight(1f).testTag("quick_login_admin")
+                    Surface(
+                        shape = RoundedCornerShape(6.dp),
+                        color = Color.LightGray.copy(alpha = 0.25f),
+                        modifier = Modifier.padding(horizontal = 4.dp)
                     ) {
-                        Text("Admin")
-                    }
-
-                    OutlinedButton(
-                        onClick = { authViewModel.quickLoginAs("john") },
-                        modifier = Modifier.weight(1f).testTag("quick_login_john")
-                    ) {
-                        Text("Cashier (John)")
-                    }
-
-                    OutlinedButton(
-                        onClick = { authViewModel.quickLoginAs("sarah") },
-                        modifier = Modifier.weight(1f).testTag("quick_login_sarah")
-                    ) {
-                        Text("Cashier (Sarah)")
+                        Row(
+                            modifier = Modifier.padding(horizontal = 10.dp, vertical = 6.dp),
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Icon(
+                                Icons.Default.Security,
+                                contentDescription = null,
+                                tint = AccentBlue,
+                                modifier = Modifier.size(16.dp)
+                            )
+                            Spacer(modifier = Modifier.width(6.dp))
+                            Text(
+                                text = "DEBUG BUILD • PBKDF2 Encrypted Storage Active",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = Color.DarkGray
+                            )
+                        }
                     }
                 }
             }
         }
     }
+
+    if (showInitialSetupDialog) {
+        InitialAdminDialog(
+            onDismiss = { showInitialSetupDialog = false },
+            onConfirm = { adminUser, adminPass ->
+                authViewModel.registerInitialAdmin(adminUser, adminPass) { success, _ ->
+                    if (success) {
+                        showInitialSetupDialog = false
+                    }
+                }
+            }
+        )
+    }
 }
+
+@Composable
+private fun InitialAdminDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (String, String) -> Unit
+) {
+    var adminUsername by remember { mutableStateOf("") }
+    var adminPassword by remember { mutableStateOf("") }
+    var confirmPassword by remember { mutableStateOf("") }
+    var localError by remember { mutableStateOf<String?>(null) }
+
+    androidx.compose.material3.AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Initial Administrator Setup") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+                Text(
+                    text = "Configure the primary administrator account for this system. Credentials will be securely derived with PBKDF2.",
+                    style = MaterialTheme.typography.bodySmall,
+                    color = Color.Gray
+                )
+                if (localError != null) {
+                    Text(
+                        text = localError!!,
+                        color = CriticalRed,
+                        style = MaterialTheme.typography.bodySmall
+                    )
+                }
+                OutlinedTextField(
+                    value = adminUsername,
+                    onValueChange = { adminUsername = it },
+                    label = { Text("Admin Username") },
+                    singleLine = true,
+                    modifier = Modifier.fillMaxWidth().testTag("setup_admin_username")
+                )
+                OutlinedTextField(
+                    value = adminPassword,
+                    onValueChange = { adminPassword = it },
+                    label = { Text("Password (min 6 characters)") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().testTag("setup_admin_password")
+                )
+                OutlinedTextField(
+                    value = confirmPassword,
+                    onValueChange = { confirmPassword = it },
+                    label = { Text("Confirm Password") },
+                    singleLine = true,
+                    visualTransformation = PasswordVisualTransformation(),
+                    modifier = Modifier.fillMaxWidth().testTag("setup_admin_confirm_password")
+                )
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = {
+                    if (adminUsername.isBlank() || adminPassword.isBlank()) {
+                        localError = "Username and password cannot be empty"
+                        return@Button
+                    }
+                    if (adminPassword.length < 6) {
+                        localError = "Password must be at least 6 characters"
+                        return@Button
+                    }
+                    if (adminPassword != confirmPassword) {
+                        localError = "Passwords do not match"
+                        return@Button
+                    }
+                    onConfirm(adminUsername, adminPassword)
+                },
+                colors = ButtonDefaults.buttonColors(containerColor = SupermarketGreen),
+                modifier = Modifier.testTag("confirm_admin_setup_btn")
+            ) {
+                Text("Create Administrator")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
