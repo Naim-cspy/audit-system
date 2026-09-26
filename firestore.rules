@@ -12,7 +12,7 @@ service cloud.firestore {
     }
 
     function isPlatformAdmin() {
-      return isAuthenticated() && request.auth.token.platform_admin == true;
+      return isAuthenticated() && (request.auth.token.platform_admin == true || request.auth.token.role == 'SAAS_OWNER');
     }
 
     function hasStoreRole(storeId, role) {
@@ -93,6 +93,19 @@ service cloud.firestore {
       allow read: if isPlatformAdmin();
       allow create: if isAuthenticated();
       allow update, delete: if false;
+    }
+
+    // ==================================================
+    // 4. SAAS PLATFORM ANALYTICS & OWNER METRICS
+    // ==================================================
+    match /platform_analytics/{docId} {
+      // Strictly restricted to SaaS Platform Owners/Admins
+      // Client/store tenants are blocked by security rules from reading or writing global platform analytics
+      allow read, write: if isPlatformAdmin();
+    }
+
+    match /platform_metrics/{metricId} {
+      allow read, write: if isPlatformAdmin();
     }
   }
 }

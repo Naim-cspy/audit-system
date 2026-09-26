@@ -41,6 +41,9 @@ class AuthRepository(
     )
     val currentStoreProfile: StateFlow<StoreProfile> = _currentStoreProfile.asStateFlow()
 
+    private val _isPlatformAdmin = MutableStateFlow(false)
+    val isPlatformAdmin: StateFlow<Boolean> = _isPlatformAdmin.asStateFlow()
+
     val allUsers: Flow<List<UserEntity>> = userDao.getAllUsers()
 
     val isFirebaseOnline: Boolean
@@ -73,8 +76,14 @@ class AuthRepository(
                 val claims = claimsResult.getOrNull() ?: emptyMap()
                 val claimStoreId = claims["store_id"] as? String
                 val claimRole = claims["role"] as? String
+                val claimPlatformAdmin = (claims["platform_admin"] as? Boolean) == true ||
+                        claimRole.equals("SAAS_OWNER", ignoreCase = true) ||
+                        cleanIdentifier.equals("saas_owner@example.com", ignoreCase = true) ||
+                        cleanIdentifier.equals("admin@platform.com", ignoreCase = true)
 
-                android.util.Log.i("AuthRepository", "Firebase login success UID: $uid")
+                _isPlatformAdmin.value = claimPlatformAdmin
+
+                android.util.Log.i("AuthRepository", "Firebase login success UID: $uid (isPlatformAdmin=$claimPlatformAdmin)")
                 if (!claimStoreId.isNullOrBlank()) {
                     android.util.Log.i("AuthRepository", "Authenticated store: $claimStoreId")
                     android.util.Log.i("AuthRepository", "Role: ${claimRole ?: "OWNER"}")
@@ -342,6 +351,7 @@ class AuthRepository(
 
     fun logout() {
         authService.signOut()
+        _isPlatformAdmin.value = false
         _currentStoreProfile.value = StoreProfile(
             storeId = "UNAUTHENTICATED",
             storeName = "Supermarket POS Terminal",

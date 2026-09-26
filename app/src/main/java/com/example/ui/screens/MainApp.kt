@@ -63,13 +63,23 @@ enum class AppTab(val title: String, val icon: ImageVector) {
 fun MainApp(
     authViewModel: AuthViewModel,
     posViewModel: PosViewModel,
-    adminViewModel: AdminViewModel
+    adminViewModel: AdminViewModel,
+    saasViewModel: com.example.ui.viewmodel.SaaSPlatformViewModel
 ) {
     val currentUser by authViewModel.currentUser.collectAsState()
     var selectedTab by remember { mutableStateOf(AppTab.POS) }
+    var showSaaSOwnerDashboard by remember { mutableStateOf(false) }
 
     if (currentUser == null) {
         LoginScreen(authViewModel = authViewModel)
+        return
+    }
+
+    if (showSaaSOwnerDashboard) {
+        SaaSPlatformOwnerScreen(
+            viewModel = saasViewModel,
+            onNavigateBack = { showSaaSOwnerDashboard = false }
+        )
         return
     }
 
@@ -100,11 +110,23 @@ fun MainApp(
                     }
                 },
                 actions = {
+                    // SaaS Owner Command Center Quick Access
+                    IconButton(
+                        onClick = { showSaaSOwnerDashboard = true },
+                        modifier = Modifier.testTag("saas_owner_center_btn")
+                    ) {
+                        Icon(
+                            imageVector = Icons.Default.AdminPanelSettings,
+                            contentDescription = "SaaS Owner Command Center",
+                            tint = Color.White
+                        )
+                    }
+
                     // User info chip
                     Surface(
                         shape = RoundedCornerShape(16.dp),
                         color = Color.White.copy(alpha = 0.2f),
-                        modifier = Modifier.padding(end = 6.dp)
+                        modifier = Modifier.padding(end = 4.dp)
                     ) {
                         Row(
                             modifier = Modifier.padding(horizontal = 8.dp, vertical = 4.dp),

@@ -16,6 +16,8 @@ import com.example.ui.viewmodel.AuthViewModel
 import com.example.ui.viewmodel.AuthViewModelFactory
 import com.example.ui.viewmodel.PosViewModel
 import com.example.ui.viewmodel.PosViewModelFactory
+import com.example.ui.viewmodel.SaaSPlatformViewModel
+import com.example.ui.viewmodel.SaaSPlatformViewModelFactory
 
 class MainActivity : ComponentActivity() {
 
@@ -24,18 +26,20 @@ class MainActivity : ComponentActivity() {
         enableEdgeToEdge()
 
         val database = AppDatabase.getDatabase(applicationContext, lifecycleScope)
-        val repository = SupermarketRepository(database)
+        val repository = SupermarketRepository(database, applicationContext)
 
         val authViewModel by viewModels<AuthViewModel> { AuthViewModelFactory(repository) }
         val posViewModel by viewModels<PosViewModel> { PosViewModelFactory(repository) }
         val adminViewModel by viewModels<AdminViewModel> { AdminViewModelFactory(repository) }
+        val saasViewModel by viewModels<SaaSPlatformViewModel> { SaaSPlatformViewModelFactory(repository) }
 
         setContent {
             SupermarketTheme {
                 MainApp(
                     authViewModel = authViewModel,
                     posViewModel = posViewModel,
-                    adminViewModel = adminViewModel
+                    adminViewModel = adminViewModel,
+                    saasViewModel = saasViewModel
                 )
             }
         }

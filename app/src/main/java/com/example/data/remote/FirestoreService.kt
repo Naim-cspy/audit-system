@@ -243,12 +243,12 @@ class FirestoreService(
                 .collection("products").limit(1)
                 .get()
                 .addOnSuccessListener {
-                    continuation.resume(Result.failure(SecurityException("TENANT ISOLATION FAILURE: Successfully accessed stores/$targetStoreId/products! Cross-tenant isolation must reject this with PERMISSION_DENIED.")))
+                    continuation.resume(Result.failure(SecurityException("CRITICAL TENANT ISOLATION FAILURE: Successfully accessed stores/$targetStoreId/products! Cross-tenant isolation must reject foreign store access.")))
                 }
                 .addOnFailureListener { exception ->
-                    val msg = exception.message ?: ""
-                    if (msg.contains("PERMISSION_DENIED", ignoreCase = true) || msg.contains("permission-denied", ignoreCase = true)) {
-                        continuation.resume(Result.success("ISOLATION VERIFIED: Request to stores/$targetStoreId/products was correctly rejected with PERMISSION_DENIED."))
+                    if (exception is com.google.firebase.firestore.FirebaseFirestoreException &&
+                        exception.code == com.google.firebase.firestore.FirebaseFirestoreException.Code.PERMISSION_DENIED) {
+                        continuation.resume(Result.success("ISOLATION VERIFIED: Request to stores/$targetStoreId/products was explicitly rejected with PERMISSION_DENIED at Firestore security boundary."))
                     } else {
                         continuation.resume(Result.failure(exception))
                     }

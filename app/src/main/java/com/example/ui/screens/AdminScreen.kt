@@ -81,7 +81,7 @@ fun AdminScreen(
     val syncEvents by adminViewModel.syncEvents.collectAsState()
     val storeProfile by adminViewModel.storeProfileFlow.collectAsState()
     val isSyncing by adminViewModel.isSyncing.collectAsState()
-    val verificationResults by adminViewModel.verificationResults.collectAsState()
+    val verificationReport by adminViewModel.verificationReport.collectAsState()
     val isRunningVerification by adminViewModel.isRunningVerification.collectAsState()
     val scope = rememberCoroutineScope()
 
@@ -358,19 +358,61 @@ fun AdminScreen(
                         }
                     }
 
-                    if (verificationResults.isNotEmpty()) {
-                        Spacer(modifier = Modifier.height(12.dp))
+                    if (verificationReport != null) {
+                        val report = verificationReport!!
+                        Spacer(modifier = Modifier.height(14.dp))
                         HorizontalDivider()
                         Spacer(modifier = Modifier.height(10.dp))
 
-                        verificationResults.forEach { item ->
+                        // Overall Status Banner
+                        val isReady = report.overallStatus == "READY"
+                        val overallColor = if (isReady) SuccessGreen else CriticalRed
+
+                        Card(
+                            colors = CardDefaults.cardColors(containerColor = overallColor.copy(alpha = 0.12f)),
+                            shape = RoundedCornerShape(8.dp),
+                            modifier = Modifier.fillMaxWidth().padding(bottom = 8.dp)
+                        ) {
+                            Row(
+                                modifier = Modifier.padding(12.dp),
+                                horizontalArrangement = Arrangement.SpaceBetween,
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Column {
+                                    Text(
+                                        text = "System Cloud Status:",
+                                        style = MaterialTheme.typography.labelSmall,
+                                        color = Color.DarkGray
+                                    )
+                                    Text(
+                                        text = if (isReady) "READY FOR PRODUCTION" else "NOT READY FOR PRODUCTION",
+                                        style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = overallColor
+                                    )
+                                }
+                                Surface(
+                                    color = overallColor,
+                                    shape = RoundedCornerShape(6.dp)
+                                ) {
+                                    Text(
+                                        text = report.overallStatus,
+                                        color = Color.White,
+                                        style = MaterialTheme.typography.labelMedium.copy(fontWeight = FontWeight.ExtraBold),
+                                        modifier = Modifier.padding(horizontal = 10.dp, vertical = 4.dp)
+                                    )
+                                }
+                            }
+                        }
+
+                        report.items.forEach { item ->
                             val badgeColor = when (item.status) {
                                 "PASSED" -> SuccessGreen
                                 "FAILED" -> CriticalRed
-                                else -> Color(0xFFF57C00)
+                                "WARNING" -> Color(0xFFF57C00)
+                                else -> Color(0xFF757575) // SKIPPED
                             }
                             Card(
-                                colors = CardDefaults.cardColors(containerColor = badgeColor.copy(alpha = 0.1f)),
+                                colors = CardDefaults.cardColors(containerColor = badgeColor.copy(alpha = 0.08f)),
                                 shape = RoundedCornerShape(8.dp),
                                 modifier = Modifier.fillMaxWidth().padding(vertical = 4.dp)
                             ) {
@@ -382,8 +424,10 @@ fun AdminScreen(
                                     ) {
                                         Text(
                                             text = item.title,
-                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold)
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                            modifier = Modifier.weight(1f)
                                         )
+                                        Spacer(modifier = Modifier.width(8.dp))
                                         Surface(
                                             color = badgeColor,
                                             shape = RoundedCornerShape(4.dp)

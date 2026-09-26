@@ -190,6 +190,44 @@ data class ProfitPrediction(
 
 data class VerificationItem(
     val title: String,
-    val status: String, // PASSED, FAILED, WARNING
-    val details: String
+    val status: String, // PASSED, FAILED, WARNING, SKIPPED
+    val details: String,
+    val isCritical: Boolean = true
 )
+
+data class VerificationSuiteReport(
+    val overallStatus: String = "NOT READY", // READY, NOT READY
+    val passedCount: Int = 0,
+    val totalCount: Int = 0,
+    val items: List<VerificationItem> = emptyList(),
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+data class PlatformMetricsSummary(
+    val totalStores: Int = 0,
+    val totalUsers: Int = 0,
+    val totalSalesVolumeUsd: Double = 0.0,
+    val totalTransactionsCount: Int = 0,
+    val totalInventorySkus: Int = 0,
+    val totalLowStockAlerts: Int = 0,
+    val totalAuditEventsCount: Int = 0,
+    val totalSessionsCount: Int = 0,
+    val featureUsageMap: Map<String, Long> = emptyMap(),
+    val suspiciousEventsCount: Int = 0,
+    val suspiciousEvents: List<SecurityEventEntity> = emptyList(),
+    val storesList: List<StorePlatformSummary> = emptyList(),
+    val lastUpdated: Long = System.currentTimeMillis()
+)
+
+data class StorePlatformSummary(
+    val storeId: String,
+    val storeName: String,
+    val region: String,
+    val subscriptionStatus: String = "ACTIVE",
+    val userCount: Int = 1,
+    val salesCount: Int = 0,
+    val revenueUsd: Double = 0.0,
+    val inventoryCount: Int = 0,
+    val lastActiveTimestamp: Long = System.currentTimeMillis()
+)
+

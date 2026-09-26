@@ -178,8 +178,8 @@ class AdminViewModel(private val repository: SupermarketRepository) : ViewModel(
         _operationMessage.value = null
     }
 
-    private val _verificationResults = MutableStateFlow<List<com.example.data.model.VerificationItem>>(emptyList())
-    val verificationResults: StateFlow<List<com.example.data.model.VerificationItem>> = _verificationResults.asStateFlow()
+    private val _verificationReport = MutableStateFlow<com.example.data.model.VerificationSuiteReport?>(null)
+    val verificationReport: StateFlow<com.example.data.model.VerificationSuiteReport?> = _verificationReport.asStateFlow()
 
     private val _isRunningVerification = MutableStateFlow(false)
     val isRunningVerification: StateFlow<Boolean> = _isRunningVerification.asStateFlow()
@@ -188,8 +188,8 @@ class AdminViewModel(private val repository: SupermarketRepository) : ViewModel(
         viewModelScope.launch {
             _isRunningVerification.value = true
             try {
-                val list = repository.runVerificationSuite()
-                _verificationResults.value = list
+                val report = repository.runVerificationSuite()
+                _verificationReport.value = report
             } catch (e: Exception) {
                 _operationMessage.value = "Verification error: ${e.message}"
             } finally {
