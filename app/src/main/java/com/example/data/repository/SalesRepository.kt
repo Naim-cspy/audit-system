@@ -37,7 +37,9 @@ class SalesRepository(
     private val firestoreService: FirestoreService = FirestoreService()
 ) {
 
-    val recentSales: Flow<List<SaleEntity>> = saleDao.getRecentSales(15)
+    fun getRecentSales(storeId: String, limit: Int = 15): Flow<List<SaleEntity>> {
+        return saleDao.getRecentSales(storeId, limit)
+    }
 
     suspend fun batchCheckout(
         storeId: String,
@@ -59,8 +61,8 @@ class SalesRepository(
         var totalAmount = 0.0
 
         for (item in cartItems) {
-            val freshProduct = productDao.getProductById(item.product.product_id)
-                ?: return@withContext Result.failure(IllegalStateException("Product ${item.product.product_name} not found"))
+            val freshProduct = productDao.getProductById(storeId, item.product.product_id)
+                ?: return@withContext Result.failure(IllegalStateException("Product ${item.product.product_name} not found in store $storeId"))
 
             if (freshProduct.product_amount_left < item.quantity) {
                 return@withContext Result.failure(
@@ -87,7 +89,7 @@ class SalesRepository(
 
         // 2. Decrement stock & prepare sales records
         for (item in cartItems) {
-            val freshProduct = productDao.getProductById(item.product.product_id)!!
+            val freshProduct = productDao.getProductById(storeId, item.product.product_id)!!
             val newAmountLeft = freshProduct.product_amount_left - item.quantity
             val newAmountSold = freshProduct.product_amount_sold + item.quantity
 
@@ -120,7 +122,7 @@ class SalesRepository(
         salesToInsert.forEach { saleDao.insert(it) }
 
         // 4. Update Financial Ledger
-        val lastBalance = balanceDao.getLatestBalance()
+        val lastBalance = balanceDao.getLatestBalance(storeId)
         val startingBudget = lastBalance?.budget_starting ?: 5000.0
         val newBalance = BalanceEntity(
             date = todayStr,

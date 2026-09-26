@@ -36,7 +36,9 @@ class FinanceRepository(
     private val firestoreService: FirestoreService = FirestoreService()
 ) {
 
-    val balanceHistory: Flow<List<BalanceEntity>> = balanceDao.getAllHistoryDesc()
+    fun getBalanceHistory(storeId: String): Flow<List<BalanceEntity>> {
+        return balanceDao.getAllHistoryDesc(storeId)
+    }
 
     suspend fun addBill(storeId: String, amount: Double, reason: String): Result<Unit> = withContext(Dispatchers.IO) {
         if (amount <= 0.0) {
@@ -48,7 +50,7 @@ class FinanceRepository(
         }
 
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val lastBalance = balanceDao.getLatestBalance()
+        val lastBalance = balanceDao.getLatestBalance(storeId)
         val startingBudget = lastBalance?.budget_starting ?: 5000.0
 
         val newBalance = BalanceEntity(
@@ -90,7 +92,7 @@ class FinanceRepository(
         }
 
         val todayStr = SimpleDateFormat("yyyy-MM-dd", Locale.getDefault()).format(Date())
-        val lastBalance = balanceDao.getLatestBalance()
+        val lastBalance = balanceDao.getLatestBalance(storeId)
         val startingBudget = lastBalance?.budget_starting ?: 5000.0
 
         val newBalance = BalanceEntity(
@@ -121,10 +123,10 @@ class FinanceRepository(
         Result.success(Unit)
     }
 
-    suspend fun getFinancialSummary(): FinancialSummary = withContext(Dispatchers.IO) {
-        val balances = balanceDao.getAllHistory().first()
-        val products = productDao.getAllProducts().first()
-        val sales = saleDao.getAllSales().first()
+    suspend fun getFinancialSummary(storeId: String): FinancialSummary = withContext(Dispatchers.IO) {
+        val balances = balanceDao.getAllHistory(storeId).first()
+        val products = productDao.getAllProducts(storeId).first()
+        val sales = saleDao.getAllSales(storeId).first()
 
         val initialBudget = balances.firstOrNull()?.budget_starting ?: 5000.0
         val totalMoneyIn = balances.sumOf { it.money_in }
@@ -160,8 +162,8 @@ class FinanceRepository(
         )
     }
 
-    suspend fun calculateProfitPrediction(): ProfitPrediction = withContext(Dispatchers.IO) {
-        val balances = balanceDao.getAllHistory().first()
+    suspend fun calculateProfitPrediction(storeId: String): ProfitPrediction = withContext(Dispatchers.IO) {
+        val balances = balanceDao.getAllHistory(storeId).first()
         if (balances.isEmpty()) {
             return@withContext ProfitPrediction(
                 hasEnoughData = false,
@@ -230,8 +232,8 @@ class FinanceRepository(
     }
 
     suspend fun getRegionalMarketInsights(profile: StoreProfile): RegionalMarketInsight = withContext(Dispatchers.IO) {
-        val products = productDao.getAllProducts().first()
-        val sales = saleDao.getAllSales().first()
+        val products = productDao.getAllProducts(profile.storeId).first()
+        val sales = saleDao.getAllSales(profile.storeId).first()
 
         val totalRevenue = sales.sumOf { it.quantity * it.price }
         val avgTicket = if (sales.isNotEmpty()) totalRevenue / sales.size else 0.0
@@ -269,13 +271,14 @@ class FinanceRepository(
         )
     }
 
-    suspend fun exportCsvSummary(): String = withContext(Dispatchers.IO) {
-        val products = productDao.getAllProducts().first()
-        val sales = saleDao.getAllSales().first()
-        val balances = balanceDao.getAllHistory().first()
+    suspend fun exportCsvSummary(storeId: String): String = withContext(Dispatchers.IO) {
+        val products = productDao.getAllProducts(storeId).first()
+        val sales = saleDao.getAllSales(storeId).first()
+        val balances = balanceDao.getAllHistory(storeId).first()
 
         val sb = StringBuilder()
         sb.append("=== SUPERMARKET AUDIT & POS EXPORT ===\n")
+        sb.append("Store ID: $storeId\n")
         sb.append("Exported At: ${SimpleDateFormat("yyyy-MM-dd HH:mm:ss", Locale.getDefault()).format(Date())}\n\n")
 
         sb.append("--- INVENTORY (${products.size} products) ---\n")
@@ -300,10 +303,10 @@ class FinanceRepository(
     }
 
     suspend fun exportJsonBackup(profile: StoreProfile): String = withContext(Dispatchers.IO) {
-        val products = productDao.getAllProducts().first()
-        val sales = saleDao.getAllSales().first()
-        val balances = balanceDao.getAllHistory().first()
-        val syncs = syncEventDao.getRecentSyncEvents(50).first()
+        val products = productDao.getAllProducts(profile.storeId).first()
+        val sales = saleDao.getAllSales(profile.storeId).first()
+        val balances = balanceDao.getAllHistory(profile.storeId).first()
+        val syncs = syncEventDao.getRecentSyncEvents(profile.storeId, 50).first()
 
         val ts = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'Z'", Locale.getDefault()).format(Date())
         val sb = StringBuilder()

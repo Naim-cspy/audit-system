@@ -28,6 +28,23 @@ class AuthViewModel(private val repository: SupermarketRepository) : ViewModel()
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
+    private val _isFirstTimeSetup = MutableStateFlow(false)
+    val isFirstTimeSetup: StateFlow<Boolean> = _isFirstTimeSetup.asStateFlow()
+
+    init {
+        checkInitialSetup()
+    }
+
+    fun checkInitialSetup() {
+        viewModelScope.launch {
+            try {
+                _isFirstTimeSetup.value = repository.authRepository.getTotalUsersCount() == 0
+            } catch (e: Exception) {
+                _isFirstTimeSetup.value = false
+            }
+        }
+    }
+
     val allUsers: StateFlow<List<UserEntity>> = repository.allUsers
         .stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
@@ -66,6 +83,7 @@ class AuthViewModel(private val repository: SupermarketRepository) : ViewModel()
                 val res = repository.createInitialAdmin(usernameOrEmail, passwordPlain)
                 if (res.isSuccess) {
                     _currentUser.value = res.getOrNull()
+                    checkInitialSetup()
                     onComplete(true, null)
                 } else {
                     val err = res.exceptionOrNull()?.message ?: "Failed to create administrator account"

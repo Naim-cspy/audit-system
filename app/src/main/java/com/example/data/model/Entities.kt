@@ -1,11 +1,15 @@
 package com.example.data.model
 
 import androidx.room.Entity
+import androidx.room.Index
 import androidx.room.PrimaryKey
 
-@Entity(tableName = "inventory")
+@Entity(
+    tableName = "inventory",
+    primaryKeys = ["store_id", "product_id"],
+    indices = [Index(value = ["store_id"])]
+)
 data class ProductEntity(
-    @PrimaryKey
     val product_id: String,
     val product_name: String,
     val product_price: Double,
@@ -20,9 +24,12 @@ data class ProductEntity(
     val updated_at: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "sales")
+@Entity(
+    tableName = "sales",
+    primaryKeys = ["store_id", "sale_id"],
+    indices = [Index(value = ["store_id"])]
+)
 data class SaleEntity(
-    @PrimaryKey
     val sale_id: String,
     val product_id: String,
     val product_name: String,
@@ -36,7 +43,10 @@ data class SaleEntity(
     val created_at: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "balance_history")
+@Entity(
+    tableName = "balance_history",
+    indices = [Index(value = ["store_id"])]
+)
 data class BalanceEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
@@ -50,7 +60,10 @@ data class BalanceEntity(
     val created_at: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "audit_logs")
+@Entity(
+    tableName = "audit_logs",
+    indices = [Index(value = ["store_id"])]
+)
 data class AuditLogEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
@@ -61,19 +74,25 @@ data class AuditLogEntity(
     val timestamp: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "users")
+@Entity(
+    tableName = "users",
+    indices = [Index(value = ["store_id", "username"], unique = true), Index(value = ["store_id"])]
+)
 data class UserEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Int = 0,
     val username: String,
     val password_hash: String,
     val salt: String = "",
-    val role: String = "cashier", // "admin" or "cashier"
+    val role: String = "cashier", // Distinct tenant role: OWNER, ADMIN, MANAGER, CASHIER, ACCOUNTANT
     val store_id: String = "STR-LBN-NAB-001",
     val created_at: Long = System.currentTimeMillis()
 )
 
-@Entity(tableName = "sync_events")
+@Entity(
+    tableName = "sync_events",
+    indices = [Index(value = ["store_id"])]
+)
 data class SyncEventEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,
@@ -90,7 +109,10 @@ data class SyncEventEntity(
     val error_message: String? = null
 )
 
-@Entity(tableName = "security_events")
+@Entity(
+    tableName = "security_events",
+    indices = [Index(value = ["store_id"])]
+)
 data class SecurityEventEntity(
     @PrimaryKey(autoGenerate = true)
     val id: Long = 0,

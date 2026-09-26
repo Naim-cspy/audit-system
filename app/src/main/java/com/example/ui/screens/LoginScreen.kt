@@ -64,14 +64,12 @@ fun LoginScreen(
     modifier: Modifier = Modifier
 ) {
     val loginError by authViewModel.loginError.collectAsState()
-    val allUsers by authViewModel.allUsers.collectAsState()
+    val isFirstTimeSetup by authViewModel.isFirstTimeSetup.collectAsState()
     val isLoading by authViewModel.isLoading.collectAsState()
 
     var username by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
     var showInitialSetupDialog by remember { mutableStateOf(false) }
-
-    val isFirstTimeSetup = allUsers.isEmpty()
 
     Box(
         modifier = modifier

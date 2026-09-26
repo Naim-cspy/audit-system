@@ -38,10 +38,10 @@ class SyncRepository(
     private val firestoreService: FirestoreService = FirestoreService()
 ) {
 
-    val allSyncEvents: Flow<List<SyncEventEntity>> = syncEventDao.getRecentSyncEvents(40)
-    val allSecurityEvents: Flow<List<SecurityEventEntity>> = securityEventDao.getRecentSecurityEvents(40)
-    val failedSyncCount: Flow<Int> = syncEventDao.getFailedCount()
-    val auditLogs: Flow<List<AuditLogEntity>> = auditLogDao.getRecentLogs(30)
+    fun getAllSyncEvents(storeId: String): Flow<List<SyncEventEntity>> = syncEventDao.getRecentSyncEvents(storeId, 40)
+    fun getAllSecurityEvents(storeId: String): Flow<List<SecurityEventEntity>> = securityEventDao.getRecentSecurityEvents(storeId, 40)
+    fun getFailedSyncCount(storeId: String): Flow<Int> = syncEventDao.getFailedCount(storeId)
+    fun getAuditLogs(storeId: String): Flow<List<AuditLogEntity>> = auditLogDao.getRecentLogs(storeId, 30)
 
     private val _isSyncing = MutableStateFlow(false)
     val isSyncing: StateFlow<Boolean> = _isSyncing.asStateFlow()
@@ -51,9 +51,11 @@ class SyncRepository(
 
     /**
      * Executes full bidirectional synchronization for the authenticated store:
-     * 1. Pushes pending local changes (Products, Sales, Ledger) to Firestore
+     * 1. Pushes pending local changes (Products, Sales, Ledger) belonging to storeId to Firestore
      * 2. Pulls remote products and ledger entries from Firestore into Room
      * 3. Emits comprehensive SyncEvent records
+     *
+     * Invariant: Never change a record's store_id. Sync ONLY records already belonging to storeId.
      */
     suspend fun syncAll(storeId: String, terminalId: String = "TERM-01", userId: String = "admin"): Result<String> = withContext(Dispatchers.IO) {
         if (storeId.isBlank() || storeId == "UNAUTHENTICATED") {
@@ -66,38 +68,39 @@ class SyncRepository(
         var pullSuccessCount = 0
 
         try {
-            // --- 1. Push Pending Local Products to Firestore ---
-            val allLocalProducts = productDao.getAllProducts().first()
-            val pendingProducts = allLocalProducts.filter { it.sync_status == "PENDING" }
+            // --- 1. Push Pending Local Products to Firestore (Filtered strictly by storeId) ---
+            val pendingProducts = productDao.getPendingProducts(storeId)
             for (p in pendingProducts) {
-                val cloudProduct = FirebaseProductDoc.fromEntity(p.copy(store_id = storeId))
+                // Invariant: Verify record already belongs to active store
+                if (p.store_id != storeId) continue
+                val cloudProduct = FirebaseProductDoc.fromEntity(p)
                 val res = firestoreService.upsertProduct(storeId, cloudProduct)
                 if (res.isSuccess) {
-                    productDao.update(p.copy(sync_status = "SYNCED", store_id = storeId))
+                    productDao.update(p.copy(sync_status = "SYNCED"))
                     pushSuccessCount++
                 }
             }
 
-            // --- 2. Push Pending Sales to Firestore ---
-            val allLocalSales = saleDao.getAllSales().first()
-            val pendingSales = allLocalSales.filter { it.sync_status == "PENDING" }
+            // --- 2. Push Pending Sales to Firestore (Filtered strictly by storeId) ---
+            val pendingSales = saleDao.getPendingSales(storeId)
             for (s in pendingSales) {
-                val cloudSale = FirebaseSaleDoc.fromEntity(s.copy(store_id = storeId))
+                if (s.store_id != storeId) continue
+                val cloudSale = FirebaseSaleDoc.fromEntity(s)
                 val res = firestoreService.recordSale(storeId, cloudSale)
                 if (res.isSuccess) {
-                    saleDao.update(s.copy(sync_status = "SYNCED", store_id = storeId))
+                    saleDao.update(s.copy(sync_status = "SYNCED"))
                     pushSuccessCount++
                 }
             }
 
-            // --- 3. Push Pending Ledger to Firestore ---
-            val allLocalLedger = balanceDao.getAllHistory().first()
-            val pendingLedger = allLocalLedger.filter { it.sync_status == "PENDING" }
+            // --- 3. Push Pending Ledger to Firestore (Filtered strictly by storeId) ---
+            val pendingLedger = balanceDao.getPendingLedger(storeId)
             for (b in pendingLedger) {
-                val cloudLedger = FirebaseLedgerDoc.fromEntity(b.copy(store_id = storeId))
+                if (b.store_id != storeId) continue
+                val cloudLedger = FirebaseLedgerDoc.fromEntity(b)
                 val res = firestoreService.recordLedger(storeId, cloudLedger)
                 if (res.isSuccess) {
-                    balanceDao.update(b.copy(sync_status = "SYNCED", store_id = storeId))
+                    balanceDao.update(b.copy(sync_status = "SYNCED"))
                     pushSuccessCount++
                 }
             }
@@ -107,12 +110,13 @@ class SyncRepository(
             if (cloudProductsResult.isSuccess) {
                 val cloudProducts = cloudProductsResult.getOrThrow()
                 for (cp in cloudProducts) {
-                    val existing = productDao.getProductById(cp.productId)
+                    val existing = productDao.getProductById(storeId, cp.productId)
+                    val entity = cp.toEntity(syncStatus = "SYNCED").copy(store_id = storeId)
                     if (existing == null) {
-                        productDao.insert(cp.toEntity(syncStatus = "SYNCED"))
+                        productDao.insert(entity)
                         pullSuccessCount++
                     } else if (cp.updatedAt > existing.updated_at) {
-                        productDao.update(cp.toEntity(syncStatus = "SYNCED"))
+                        productDao.update(entity)
                         pullSuccessCount++
                     }
                 }

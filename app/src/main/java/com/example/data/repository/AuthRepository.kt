@@ -20,9 +20,17 @@ import kotlinx.coroutines.withContext
 
 /**
  * Authentication and Identity Repository.
- * Integrates Firebase Authentication as the cloud source of truth,
- * with Room local caching and secure offline fallback.
- * Strictly derives storeId from the authenticated account to prevent cross-tenant access.
+ *
+ * Enforces production security rules:
+ * - Uses verified Firebase token custom claims as the sole authority for cloud tenant access.
+ * - No hard-coded email shortcuts for SaaS Owner / Platform Admin access.
+ * - Platform Admin access strictly requires `platform_admin == true` or role `SAAS_OWNER`.
+ * - Tenant accounts require valid `store_id` and supported role custom claims (no fake fallbacks).
+ * - Preserves distinct tenant roles (OWNER, ADMIN, MANAGER, CASHIER, ACCOUNTANT).
+ * - Never falls back to local credentials after a rejected Firebase email/password login.
+ * - Correct argument order for PBKDF2 password verification: (password, storedHash, salt).
+ * - Offline/local login never grants platform owner privileges.
+ * - All Room queries and state cleared on logout and account transitions.
  */
 class AuthRepository(
     private val userDao: UserDao,
@@ -44,16 +52,21 @@ class AuthRepository(
     private val _isPlatformAdmin = MutableStateFlow(false)
     val isPlatformAdmin: StateFlow<Boolean> = _isPlatformAdmin.asStateFlow()
 
-    val allUsers: Flow<List<UserEntity>> = userDao.getAllUsers()
-
     val isFirebaseOnline: Boolean
         get() = authService.currentUser != null || authService.currentUid != null
 
+    fun getUsersForStore(storeId: String): Flow<List<UserEntity>> {
+        return userDao.getAllUsers(storeId)
+    }
+
+    suspend fun getTotalUsersCount(): Int = withContext(Dispatchers.IO) {
+        userDao.totalCount()
+    }
+
     /**
-     * Authenticates via Firebase Authentication first.
-     * On success, resolves store membership from Firestore, verifies role,
-     * updates the active StoreProfile, and caches the user session in Room.
-     * If the login is a local username or offline, validates against local Room PBKDF2 hash.
+     * Authenticates via Firebase Authentication first if identifier is an email (contains '@').
+     * If Firebase authentication fails, does NOT fall back to local credentials.
+     * Offline local authentication is only used for non-email usernames or explicit local credentials.
      */
     suspend fun login(identifier: String, passwordPlain: String): Result<UserEntity> = withContext(Dispatchers.IO) {
         val cleanIdentifier = identifier.trim()
@@ -63,132 +76,209 @@ class AuthRepository(
             return@withContext Result.failure(IllegalArgumentException("Identifier and password cannot be empty"))
         }
 
-        // 1. If identifier contains '@', try Firebase Authentication directly
+        // 1. Firebase Authentication for email accounts
         if (cleanIdentifier.contains("@")) {
             val fbResult = authService.signIn(cleanIdentifier, cleanPass)
-            if (fbResult.isSuccess) {
-                val fbUser = fbResult.getOrThrow()
-                val uid = fbUser.uid
-                val email = fbUser.email ?: cleanIdentifier
-
-                // 1. Extract trusted token claims from Firebase JWT
-                val claimsResult = authService.getIdTokenClaims(forceRefresh = true)
-                val claims = claimsResult.getOrNull() ?: emptyMap()
-                val claimStoreId = claims["store_id"] as? String
-                val claimRole = claims["role"] as? String
-                val claimPlatformAdmin = (claims["platform_admin"] as? Boolean) == true ||
-                        claimRole.equals("SAAS_OWNER", ignoreCase = true) ||
-                        cleanIdentifier.equals("saas_owner@example.com", ignoreCase = true) ||
-                        cleanIdentifier.equals("admin@platform.com", ignoreCase = true)
-
-                _isPlatformAdmin.value = claimPlatformAdmin
-
-                android.util.Log.i("AuthRepository", "Firebase login success UID: $uid (isPlatformAdmin=$claimPlatformAdmin)")
-                if (!claimStoreId.isNullOrBlank()) {
-                    android.util.Log.i("AuthRepository", "Authenticated store: $claimStoreId")
-                    android.util.Log.i("AuthRepository", "Role: ${claimRole ?: "OWNER"}")
-                }
-
-                // Resolve store membership (trusted token claims take priority, then Firestore doc fallback)
-                val finalStoreId: String
-                val finalRole: String
-
-                if (!claimStoreId.isNullOrBlank()) {
-                    finalStoreId = claimStoreId
-                    finalRole = claimRole ?: "OWNER"
-                } else {
-                    val profileResult = firestoreService.getUserProfile(uid)
-                    var userProfile = profileResult.getOrNull()
-                    if (userProfile == null || userProfile.storeId.isBlank()) {
-                        val defaultStoreId = "STR-" + uid.take(6).uppercase()
-                        userProfile = FirebaseUserProfile(
-                            uid = uid,
-                            email = email,
-                            storeId = defaultStoreId,
-                            role = "OWNER",
-                            displayName = cleanIdentifier.substringBefore("@")
-                        )
-                        firestoreService.saveUserProfile(userProfile)
-                    }
-                    finalStoreId = userProfile.storeId
-                    finalRole = userProfile.role
-                }
-
-                // Load or sync store document
-                val storeDocResult = firestoreService.getStoreProfile(finalStoreId)
-                val storeDoc = storeDocResult.getOrNull() ?: FirebaseStoreDoc(
-                    storeId = finalStoreId,
-                    storeName = "Supermarket Terminal ($finalStoreId)",
-                    region = "Central District"
-                ).also { firestoreService.saveStoreProfile(it) }
-
-                _currentStoreProfile.value = storeDoc.toStoreProfile()
-
-                // Cache or update in local Room
-                val localUser = UserEntity(
-                    username = cleanIdentifier,
-                    password_hash = "FIREBASE_MANAGED_UID_$uid",
-                    salt = "FIREBASE_AUTH",
-                    role = if (finalRole.equals("cashier", ignoreCase = true)) "cashier" else "admin",
-                    store_id = finalStoreId
+            if (fbResult.isFailure) {
+                // Security invariant: DO NOT fall back to local credentials after rejected Firebase login
+                _isPlatformAdmin.value = false
+                _currentStoreProfile.value = StoreProfile(
+                    storeId = "UNAUTHENTICATED",
+                    storeName = "Supermarket POS Terminal",
+                    region = "Global Multi-Tenant",
+                    subscriptionStatus = "PENDING_AUTH"
                 )
-                val existingLocal = userDao.getByUsername(cleanIdentifier)
-                if (existingLocal == null) {
-                    userDao.insert(localUser)
-                } else {
-                    userDao.updatePassword(cleanIdentifier, localUser.password_hash, localUser.salt)
-                }
-
                 auditLogDao.insert(
                     AuditLogEntity(
-                        action = "FIREBASE_LOGIN_SUCCESS",
-                        details = "User '$cleanIdentifier' signed in via Firebase Auth (UID: $uid, Store: $finalStoreId, Role: $finalRole)",
-                        store_id = finalStoreId,
-                        user_id = uid
+                        action = "FIREBASE_LOGIN_FAILED",
+                        details = "Firebase authentication rejected for '$cleanIdentifier': ${fbResult.exceptionOrNull()?.message}",
+                        store_id = "UNAUTHENTICATED",
+                        user_id = cleanIdentifier
                     )
                 )
-
-                return@withContext Result.success(localUser)
+                return@withContext Result.failure(
+                    fbResult.exceptionOrNull() ?: IllegalArgumentException("Invalid Firebase email or password")
+                )
             }
+
+            val fbUser = fbResult.getOrThrow()
+            val uid = fbUser.uid
+            val email = fbUser.email ?: cleanIdentifier
+
+            // Extract verified token claims from Firebase JWT
+            val claimsResult = authService.getIdTokenClaims(forceRefresh = true)
+            if (claimsResult.isFailure) {
+                _isPlatformAdmin.value = false
+                return@withContext Result.failure(
+                    IllegalStateException("Failed to retrieve verified token claims: ${claimsResult.exceptionOrNull()?.message}")
+                )
+            }
+
+            val claims = claimsResult.getOrThrow()
+            val rawPlatformAdmin = (claims["platform_admin"] as? Boolean) == true
+            val rawRole = (claims["role"] as? String)?.trim()?.uppercase()
+            val rawStoreId = (claims["store_id"] as? String)?.trim()
+
+            // Security invariant: Allow SaaS owner access ONLY with platform_admin == true or exact role SAAS_OWNER.
+            // NO hard-coded email shortcuts!
+            val isSaaSOwner = rawPlatformAdmin || rawRole == "SAAS_OWNER"
+
+            val finalStoreId: String
+            val finalRole: String
+
+            if (isSaaSOwner) {
+                _isPlatformAdmin.value = true
+                finalRole = "SAAS_OWNER"
+                finalStoreId = if (!rawStoreId.isNullOrBlank()) rawStoreId else "PLATFORM_GLOBAL"
+            } else {
+                _isPlatformAdmin.value = false
+
+                // Security invariant: Require valid store_id and supported role claims for tenant accounts.
+                // Do NOT fabricate OWNER roles or store memberships!
+                if (rawStoreId.isNullOrBlank()) {
+                    _currentStoreProfile.value = StoreProfile(
+                        storeId = "UNAUTHENTICATED",
+                        storeName = "Supermarket POS Terminal",
+                        region = "Global Multi-Tenant",
+                        subscriptionStatus = "PENDING_AUTH"
+                    )
+                    return@withContext Result.failure(
+                        IllegalStateException("Account '$cleanIdentifier' lacks 'store_id' claim. Cloud provisioning required.")
+                    )
+                }
+
+                if (rawRole.isNullOrBlank()) {
+                    _currentStoreProfile.value = StoreProfile(
+                        storeId = "UNAUTHENTICATED",
+                        storeName = "Supermarket POS Terminal",
+                        region = "Global Multi-Tenant",
+                        subscriptionStatus = "PENDING_AUTH"
+                    )
+                    return@withContext Result.failure(
+                        IllegalStateException("Account '$cleanIdentifier' lacks 'role' claim. Cloud provisioning required.")
+                    )
+                }
+
+                val supportedRoles = setOf("OWNER", "ADMIN", "MANAGER", "CASHIER", "ACCOUNTANT")
+                if (rawRole !in supportedRoles) {
+                    _currentStoreProfile.value = StoreProfile(
+                        storeId = "UNAUTHENTICATED",
+                        storeName = "Supermarket POS Terminal",
+                        region = "Global Multi-Tenant",
+                        subscriptionStatus = "PENDING_AUTH"
+                    )
+                    return@withContext Result.failure(
+                        IllegalStateException("Unsupported role '$rawRole'. Supported tenant roles: ${supportedRoles.joinToString()}")
+                    )
+                }
+
+                finalStoreId = rawStoreId
+                finalRole = rawRole // Preserve distinct tenant role!
+            }
+
+            // Load store profile for tenant
+            if (finalStoreId == "PLATFORM_GLOBAL") {
+                _currentStoreProfile.value = StoreProfile(
+                    storeId = "PLATFORM_GLOBAL",
+                    storeName = "SaaS Platform Global Console",
+                    region = "Platform-Wide",
+                    subscriptionStatus = "ACTIVE"
+                )
+            } else {
+                val storeDocResult = firestoreService.getStoreProfile(finalStoreId)
+                val storeProfile = storeDocResult.getOrNull()?.toStoreProfile() ?: StoreProfile(
+                    storeId = finalStoreId,
+                    storeName = "Store ($finalStoreId)",
+                    region = "Tenant Store"
+                )
+                _currentStoreProfile.value = storeProfile
+            }
+
+            // Cache or update in local Room DB for tenant
+            val localUser = UserEntity(
+                username = cleanIdentifier,
+                password_hash = "FIREBASE_MANAGED_UID_$uid",
+                salt = "FIREBASE_AUTH",
+                role = finalRole,
+                store_id = finalStoreId
+            )
+
+            val existingLocal = userDao.getByUsername(finalStoreId, cleanIdentifier)
+            if (existingLocal == null) {
+                userDao.insert(localUser)
+            } else {
+                userDao.updatePassword(finalStoreId, cleanIdentifier, localUser.password_hash, localUser.salt)
+            }
+
+            auditLogDao.insert(
+                AuditLogEntity(
+                    action = "FIREBASE_LOGIN_SUCCESS",
+                    details = "User '$cleanIdentifier' signed in via Firebase Auth (UID: $uid, Store: $finalStoreId, Role: $finalRole)",
+                    store_id = finalStoreId,
+                    user_id = uid
+                )
+            )
+
+            return@withContext Result.success(localUser)
         }
 
-        // 2. Validate against local Room PBKDF2 database
-        val localUser = userDao.getByUsername(cleanIdentifier)
-        if (localUser != null) {
-            val isValid = PasswordSecurity.verifyPassword(cleanPass, localUser.salt, localUser.password_hash)
-            if (isValid) {
-                // Update active store profile based on local user's assigned store_id
-                _currentStoreProfile.value = StoreProfile(
-                    storeId = localUser.store_id.ifBlank { "STR-LOCAL-001" },
-                    storeName = "Supermarket Terminal",
-                    region = "Local Offline Cache"
+        // 2. Validate against local Room PBKDF2 database for local username logins (Offline mode)
+        // Security invariant: Offline login NEVER grants platform owner privileges.
+        _isPlatformAdmin.value = false
+
+        val matchingUsers = userDao.findUsersByUsername(cleanIdentifier)
+        if (matchingUsers.isEmpty()) {
+            auditLogDao.insert(
+                AuditLogEntity(
+                    action = "LOGIN_FAILED",
+                    details = "User '$cleanIdentifier' not found in local store database",
+                    store_id = _currentStoreProfile.value.storeId,
+                    user_id = cleanIdentifier
                 )
-                auditLogDao.insert(
-                    AuditLogEntity(
-                        action = "LOCAL_LOGIN_SUCCESS",
-                        details = "User '$cleanIdentifier' authenticated locally against secure offline cache",
-                        store_id = localUser.store_id,
-                        user_id = localUser.username
-                    )
+            )
+            return@withContext Result.failure(IllegalArgumentException("Invalid credentials or account not found"))
+        }
+
+        // If currently in a specific store context, prioritize that store's user
+        val targetUser = if (_currentStoreProfile.value.storeId != "UNAUTHENTICATED") {
+            matchingUsers.firstOrNull { it.store_id == _currentStoreProfile.value.storeId } ?: matchingUsers.first()
+        } else {
+            matchingUsers.first()
+        }
+
+        // Security invariant: Correct password verification argument order: (password, storedHash, salt)
+        val isValid = PasswordSecurity.verifyPassword(cleanPass, targetUser.password_hash, targetUser.salt)
+        if (isValid) {
+            _isPlatformAdmin.value = false // Strictly false for offline local users
+            _currentStoreProfile.value = StoreProfile(
+                storeId = targetUser.store_id.ifBlank { "STR-LOCAL-001" },
+                storeName = "Store (${targetUser.store_id})",
+                region = "Local Offline Cache"
+            )
+            auditLogDao.insert(
+                AuditLogEntity(
+                    action = "LOCAL_LOGIN_SUCCESS",
+                    details = "User '$cleanIdentifier' authenticated locally (Store: ${targetUser.store_id}, Role: ${targetUser.role})",
+                    store_id = targetUser.store_id,
+                    user_id = targetUser.username
                 )
-                return@withContext Result.success(localUser)
-            }
+            )
+            return@withContext Result.success(targetUser)
         }
 
         auditLogDao.insert(
             AuditLogEntity(
                 action = "LOGIN_FAILED",
-                details = "Authentication failed for identifier '$cleanIdentifier'",
-                store_id = _currentStoreProfile.value.storeId,
+                details = "Local authentication failed (invalid password) for user '$cleanIdentifier'",
+                store_id = targetUser.store_id,
                 user_id = cleanIdentifier
             )
         )
-        Result.failure(IllegalArgumentException("Invalid credentials or account not found"))
+        Result.failure(IllegalArgumentException("Invalid credentials"))
     }
 
     /**
      * Provisions initial administrator credentials.
-     * Registers both on Firebase (if email format provided) and local Room database.
      */
     suspend fun createInitialAdmin(usernameOrEmail: String, passwordPlain: String): Result<UserEntity> = withContext(Dispatchers.IO) {
         val cleanId = usernameOrEmail.trim()
@@ -201,45 +291,33 @@ class AuthRepository(
             return@withContext Result.failure(IllegalArgumentException("Password must be at least 6 characters"))
         }
 
-        val allUsersNow = userDao.getAllUsers().first()
-        if (allUsersNow.isNotEmpty()) {
+        val totalUsers = userDao.totalCount()
+        if (totalUsers > 0) {
             return@withContext Result.failure(IllegalStateException("Administrator account already provisioned"))
         }
 
-        var storeId = "STR-LBN-NAB-001"
-        var uid = "admin"
+        val defaultStoreId = "STR-LBN-NAB-001"
 
-        // If email, register with Firebase Auth
         if (cleanId.contains("@")) {
             val fbResult = authService.signUp(cleanId, cleanPass)
             if (fbResult.isSuccess) {
                 val fbUser = fbResult.getOrThrow()
-                uid = fbUser.uid
-                storeId = "STR-" + uid.take(6).uppercase()
-
                 val profile = FirebaseUserProfile(
-                    uid = uid,
+                    uid = fbUser.uid,
                     email = cleanId,
-                    storeId = storeId,
-                    role = "admin",
+                    storeId = defaultStoreId,
+                    role = "OWNER",
                     displayName = cleanId.substringBefore("@")
                 )
                 firestoreService.saveUserProfile(profile)
 
                 val storeDoc = FirebaseStoreDoc(
-                    storeId = storeId,
+                    storeId = defaultStoreId,
                     storeName = "Al-Makhzen Supermarket",
                     region = "Nabatieh Area, South Lebanon"
                 )
                 firestoreService.saveStoreProfile(storeDoc)
-                _currentStoreProfile.value = storeDoc.toStoreProfile()
             }
-        } else {
-            _currentStoreProfile.value = StoreProfile(
-                storeId = storeId,
-                storeName = "Al-Makhzen Supermarket",
-                region = "Nabatieh Area, South Lebanon"
-            )
         }
 
         val salt = PasswordSecurity.generateSalt()
@@ -248,16 +326,22 @@ class AuthRepository(
             username = cleanId,
             password_hash = hash,
             salt = salt,
-            role = "admin",
-            store_id = storeId
+            role = "OWNER",
+            store_id = defaultStoreId
         )
         userDao.insert(adminUser)
+
+        _currentStoreProfile.value = StoreProfile(
+            storeId = defaultStoreId,
+            storeName = "Al-Makhzen Supermarket",
+            region = "Nabatieh Area, South Lebanon"
+        )
 
         auditLogDao.insert(
             AuditLogEntity(
                 action = "INITIAL_ADMIN_PROVISIONED",
-                details = "Primary administrator account provisioned: '$cleanId' (Store: $storeId)",
-                store_id = storeId,
+                details = "Primary administrator account provisioned: '$cleanId' (Store: $defaultStoreId)",
+                store_id = defaultStoreId,
                 user_id = cleanId
             )
         )
@@ -268,25 +352,34 @@ class AuthRepository(
     suspend fun addUser(username: String, passwordPlain: String, role: String): Result<Unit> = withContext(Dispatchers.IO) {
         val cleanUser = username.trim()
         val cleanPass = passwordPlain.trim()
+        val cleanRole = role.trim().uppercase()
+        val supportedRoles = setOf("OWNER", "ADMIN", "MANAGER", "CASHIER", "ACCOUNTANT")
+        val validRole = if (cleanRole in supportedRoles) cleanRole else "CASHIER"
+
         if (cleanUser.isEmpty() || cleanPass.isEmpty()) {
             return@withContext Result.failure(IllegalArgumentException("Username and password cannot be empty"))
         }
         if (cleanPass.length < 6) {
             return@withContext Result.failure(IllegalArgumentException("Password must be at least 6 characters"))
         }
-        val existing = userDao.getByUsername(cleanUser)
-        if (existing != null) {
-            return@withContext Result.failure(IllegalArgumentException("Username $cleanUser already exists"))
-        }
 
         val currentStore = _currentStoreProfile.value.storeId
+        if (currentStore.isBlank() || currentStore == "UNAUTHENTICATED") {
+            return@withContext Result.failure(IllegalStateException("Cannot add user without an authenticated store session"))
+        }
+
+        val existing = userDao.getByUsername(currentStore, cleanUser)
+        if (existing != null) {
+            return@withContext Result.failure(IllegalArgumentException("User '$cleanUser' already exists in store '$currentStore'"))
+        }
+
         val salt = PasswordSecurity.generateSalt()
         val hash = PasswordSecurity.hashPassword(cleanPass, salt)
         val newUser = UserEntity(
             username = cleanUser,
             password_hash = hash,
             salt = salt,
-            role = if (role.lowercase() == "admin") "admin" else "cashier",
+            role = validRole,
             store_id = currentStore
         )
         userDao.insert(newUser)
@@ -294,7 +387,7 @@ class AuthRepository(
         auditLogDao.insert(
             AuditLogEntity(
                 action = "ADD_USER",
-                details = "Added user '$cleanUser' with role '$role' to store '$currentStore'",
+                details = "Added user '$cleanUser' with role '$validRole' to store '$currentStore'",
                 store_id = currentStore,
                 user_id = cleanUser
             )
@@ -304,22 +397,28 @@ class AuthRepository(
 
     suspend fun deleteUser(username: String): Result<Unit> = withContext(Dispatchers.IO) {
         val cleanUser = username.trim()
-        val userToDelete = userDao.getByUsername(cleanUser)
-            ?: return@withContext Result.failure(IllegalArgumentException("User $cleanUser does not exist"))
+        val currentStore = _currentStoreProfile.value.storeId
+        if (currentStore.isBlank() || currentStore == "UNAUTHENTICATED") {
+            return@withContext Result.failure(IllegalStateException("No active store session"))
+        }
 
-        if (userToDelete.role == "admin") {
-            val allUsers = userDao.getAllUsers().first()
-            val adminCount = allUsers.count { it.role == "admin" }
+        val userToDelete = userDao.getByUsername(currentStore, cleanUser)
+            ?: return@withContext Result.failure(IllegalArgumentException("User '$cleanUser' does not exist in store '$currentStore'"))
+
+        if (userToDelete.role.uppercase() in setOf("ADMIN", "OWNER")) {
+            val allUsers = userDao.getAllUsers(currentStore).first()
+            val adminCount = allUsers.count { it.role.uppercase() in setOf("ADMIN", "OWNER") }
             if (adminCount <= 1) {
-                return@withContext Result.failure(IllegalArgumentException("Cannot delete the only administrator account"))
+                return@withContext Result.failure(IllegalArgumentException("Cannot delete the only administrator/owner account for store '$currentStore'"))
             }
         }
-        userDao.deleteByUsername(cleanUser)
+
+        userDao.deleteByUsername(currentStore, cleanUser)
         auditLogDao.insert(
             AuditLogEntity(
                 action = "DELETE_USER",
-                details = "Deleted user '$cleanUser'",
-                store_id = _currentStoreProfile.value.storeId,
+                details = "Deleted user '$cleanUser' from store '$currentStore'",
+                store_id = currentStore,
                 user_id = cleanUser
             )
         )
@@ -332,17 +431,23 @@ class AuthRepository(
         if (cleanPass.length < 6) {
             return@withContext Result.failure(IllegalArgumentException("New password must be at least 6 characters"))
         }
-        userDao.getByUsername(cleanUser)
-            ?: return@withContext Result.failure(IllegalArgumentException("User $cleanUser not found"))
+
+        val currentStore = _currentStoreProfile.value.storeId
+        if (currentStore.isBlank() || currentStore == "UNAUTHENTICATED") {
+            return@withContext Result.failure(IllegalStateException("No active store session"))
+        }
+
+        userDao.getByUsername(currentStore, cleanUser)
+            ?: return@withContext Result.failure(IllegalArgumentException("User '$cleanUser' not found in store '$currentStore'"))
 
         val salt = PasswordSecurity.generateSalt()
         val hash = PasswordSecurity.hashPassword(cleanPass, salt)
-        userDao.updatePassword(cleanUser, hash, salt)
+        userDao.updatePassword(currentStore, cleanUser, hash, salt)
         auditLogDao.insert(
             AuditLogEntity(
                 action = "CHANGE_PASSWORD",
-                details = "Password updated for user '$cleanUser'",
-                store_id = _currentStoreProfile.value.storeId,
+                details = "Password updated for user '$cleanUser' in store '$currentStore'",
+                store_id = currentStore,
                 user_id = cleanUser
             )
         )

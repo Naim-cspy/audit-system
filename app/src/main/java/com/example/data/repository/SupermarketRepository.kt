@@ -16,6 +16,8 @@ import com.example.data.model.SyncEventEntity
 import com.example.data.model.UserEntity
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
 
 /**
  * Unified Supermarket Repository Facade.
@@ -54,26 +56,70 @@ class SupermarketRepository(
     val currentStoreProfile: StoreProfile
         get() = authRepository.currentStoreProfile.value
 
-    val allProducts: Flow<List<ProductEntity>> = productRepository.allProducts
-    val recentSales: Flow<List<SaleEntity>> = salesRepository.recentSales
-    val balanceHistory: Flow<List<BalanceEntity>> = financeRepository.balanceHistory
-    val allUsers: Flow<List<UserEntity>> = authRepository.allUsers
-    val auditLogs: Flow<List<AuditLogEntity>> = syncRepository.auditLogs
-    val allSyncEvents: Flow<List<SyncEventEntity>> = syncRepository.allSyncEvents
-    val allSecurityEvents: Flow<List<SecurityEventEntity>> = syncRepository.allSecurityEvents
-    val failedSyncCount: Flow<Int> = syncRepository.failedSyncCount
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val allProducts: Flow<List<ProductEntity>> = currentStoreProfileFlow.flatMapLatest { profile ->
+        if (profile.storeId == "UNAUTHENTICATED") kotlinx.coroutines.flow.flowOf(emptyList())
+        else productRepository.getAllProducts(profile.storeId)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val recentSales: Flow<List<SaleEntity>> = currentStoreProfileFlow.flatMapLatest { profile ->
+        if (profile.storeId == "UNAUTHENTICATED") kotlinx.coroutines.flow.flowOf(emptyList())
+        else salesRepository.getRecentSales(profile.storeId)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val balanceHistory: Flow<List<BalanceEntity>> = currentStoreProfileFlow.flatMapLatest { profile ->
+        if (profile.storeId == "UNAUTHENTICATED") kotlinx.coroutines.flow.flowOf(emptyList())
+        else financeRepository.getBalanceHistory(profile.storeId)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val allUsers: Flow<List<UserEntity>> = currentStoreProfileFlow.flatMapLatest { profile ->
+        if (profile.storeId == "UNAUTHENTICATED") kotlinx.coroutines.flow.flowOf(emptyList())
+        else authRepository.getUsersForStore(profile.storeId)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val auditLogs: Flow<List<AuditLogEntity>> = currentStoreProfileFlow.flatMapLatest { profile ->
+        if (profile.storeId == "UNAUTHENTICATED") kotlinx.coroutines.flow.flowOf(emptyList())
+        else syncRepository.getAuditLogs(profile.storeId)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val allSyncEvents: Flow<List<SyncEventEntity>> = currentStoreProfileFlow.flatMapLatest { profile ->
+        if (profile.storeId == "UNAUTHENTICATED") kotlinx.coroutines.flow.flowOf(emptyList())
+        else syncRepository.getAllSyncEvents(profile.storeId)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val allSecurityEvents: Flow<List<SecurityEventEntity>> = currentStoreProfileFlow.flatMapLatest { profile ->
+        if (profile.storeId == "UNAUTHENTICATED") kotlinx.coroutines.flow.flowOf(emptyList())
+        else syncRepository.getAllSecurityEvents(profile.storeId)
+    }
+
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val failedSyncCount: Flow<Int> = currentStoreProfileFlow.flatMapLatest { profile ->
+        if (profile.storeId == "UNAUTHENTICATED") kotlinx.coroutines.flow.flowOf(0)
+        else syncRepository.getFailedSyncCount(profile.storeId)
+    }
+
     val isSyncing: StateFlow<Boolean> = syncRepository.isSyncing
 
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
     fun getStockWarnings(threshold: Int = 50): Flow<List<ProductEntity>> {
-        return productRepository.getStockWarnings(threshold)
+        return currentStoreProfileFlow.flatMapLatest { profile ->
+            if (profile.storeId == "UNAUTHENTICATED") kotlinx.coroutines.flow.flowOf(emptyList())
+            else productRepository.getStockWarnings(profile.storeId, threshold)
+        }
     }
 
     fun searchProducts(query: String): Flow<List<ProductEntity>> {
-        return productRepository.searchProducts(query)
+        return productRepository.searchProducts(currentStoreProfile.storeId, query)
     }
 
     suspend fun lookupProduct(code: String): ProductEntity? {
-        return productRepository.lookupProduct(code)
+        return productRepository.lookupProduct(currentStoreProfile.storeId, code)
     }
 
     suspend fun batchCheckout(cartItems: List<CartItem>, customerId: String = "C101"): Result<Receipt> {
@@ -134,11 +180,11 @@ class SupermarketRepository(
     }
 
     suspend fun getFinancialSummary(): FinancialSummary {
-        return financeRepository.getFinancialSummary()
+        return financeRepository.getFinancialSummary(currentStoreProfile.storeId)
     }
 
     suspend fun calculateProfitPrediction(): ProfitPrediction {
-        return financeRepository.calculateProfitPrediction()
+        return financeRepository.calculateProfitPrediction(currentStoreProfile.storeId)
     }
 
     suspend fun getRegionalMarketInsights(): RegionalMarketInsight {
@@ -146,7 +192,7 @@ class SupermarketRepository(
     }
 
     suspend fun exportCsvSummary(): String {
-        return financeRepository.exportCsvSummary()
+        return financeRepository.exportCsvSummary(currentStoreProfile.storeId)
     }
 
     suspend fun exportJsonBackup(): String {

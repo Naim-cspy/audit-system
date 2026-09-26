@@ -67,6 +67,7 @@ fun MainApp(
     saasViewModel: com.example.ui.viewmodel.SaaSPlatformViewModel
 ) {
     val currentUser by authViewModel.currentUser.collectAsState()
+    val isPlatformAdmin by saasViewModel.isPlatformAdmin.collectAsState()
     var selectedTab by remember { mutableStateOf(AppTab.POS) }
     var showSaaSOwnerDashboard by remember { mutableStateOf(false) }
 
@@ -75,7 +76,7 @@ fun MainApp(
         return
     }
 
-    if (showSaaSOwnerDashboard) {
+    if (showSaaSOwnerDashboard && isPlatformAdmin) {
         SaaSPlatformOwnerScreen(
             viewModel = saasViewModel,
             onNavigateBack = { showSaaSOwnerDashboard = false }
@@ -110,16 +111,18 @@ fun MainApp(
                     }
                 },
                 actions = {
-                    // SaaS Owner Command Center Quick Access
-                    IconButton(
-                        onClick = { showSaaSOwnerDashboard = true },
-                        modifier = Modifier.testTag("saas_owner_center_btn")
-                    ) {
-                        Icon(
-                            imageVector = Icons.Default.AdminPanelSettings,
-                            contentDescription = "SaaS Owner Command Center",
-                            tint = Color.White
-                        )
+                    // SaaS Owner Command Center Access (Strictly restricted to platform admins)
+                    if (isPlatformAdmin) {
+                        IconButton(
+                            onClick = { showSaaSOwnerDashboard = true },
+                            modifier = Modifier.testTag("saas_owner_center_btn")
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.AdminPanelSettings,
+                                contentDescription = "SaaS Owner Command Center",
+                                tint = Color.White
+                            )
+                        }
                     }
 
                     // User info chip
@@ -147,7 +150,13 @@ fun MainApp(
                     }
 
                     IconButton(
-                        onClick = { authViewModel.logout() },
+                        onClick = {
+                            authViewModel.logout()
+                            posViewModel.clearCart()
+                            posViewModel.dismissReceipt()
+                            showSaaSOwnerDashboard = false
+                            selectedTab = AppTab.POS
+                        },
                         modifier = Modifier.testTag("logout_btn")
                     ) {
                         Icon(

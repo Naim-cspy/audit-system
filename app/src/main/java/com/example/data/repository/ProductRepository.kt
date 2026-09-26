@@ -21,20 +21,22 @@ class ProductRepository(
     val firestoreService: FirestoreService = FirestoreService()
 ) {
 
-    val allProducts: Flow<List<ProductEntity>> = productDao.getAllProducts()
-
-    fun getStockWarnings(threshold: Int = 50): Flow<List<ProductEntity>> {
-        return productDao.getStockWarnings(threshold)
+    fun getAllProducts(storeId: String): Flow<List<ProductEntity>> {
+        return productDao.getAllProducts(storeId)
     }
 
-    fun searchProducts(query: String): Flow<List<ProductEntity>> {
-        return productDao.searchProducts(query)
+    fun getStockWarnings(storeId: String, threshold: Int = 50): Flow<List<ProductEntity>> {
+        return productDao.getStockWarnings(storeId, threshold)
     }
 
-    suspend fun lookupProduct(code: String): ProductEntity? = withContext(Dispatchers.IO) {
+    fun searchProducts(storeId: String, query: String): Flow<List<ProductEntity>> {
+        return productDao.searchProducts(storeId, query)
+    }
+
+    suspend fun lookupProduct(storeId: String, code: String): ProductEntity? = withContext(Dispatchers.IO) {
         val trimmed = code.trim()
         if (trimmed.isEmpty()) return@withContext null
-        productDao.getProductById(trimmed)
+        productDao.getProductById(storeId, trimmed)
     }
 
     suspend fun addProduct(
@@ -60,9 +62,9 @@ class ProductRepository(
             return@withContext Result.failure(IllegalArgumentException("Amount left cannot be negative"))
         }
 
-        val existing = productDao.getProductById(cleanId)
+        val existing = productDao.getProductById(storeId, cleanId)
         if (existing != null) {
-            return@withContext Result.failure(IllegalArgumentException("Product with ID '$cleanId' already exists"))
+            return@withContext Result.failure(IllegalArgumentException("Product with ID '$cleanId' already exists in store '$storeId'"))
         }
 
         val now = System.currentTimeMillis()
@@ -108,8 +110,8 @@ class ProductRepository(
             return@withContext Result.failure(IllegalArgumentException("Price must be greater than zero"))
         }
 
-        val product = productDao.getProductById(cleanId)
-            ?: return@withContext Result.failure(IllegalArgumentException("Product not found"))
+        val product = productDao.getProductById(storeId, cleanId)
+            ?: return@withContext Result.failure(IllegalArgumentException("Product not found in store '$storeId'"))
 
         val oldPrice = product.product_price
         val now = System.currentTimeMillis()
@@ -140,8 +142,8 @@ class ProductRepository(
 
     suspend fun removeProduct(storeId: String, productId: String): Result<Unit> = withContext(Dispatchers.IO) {
         val cleanId = productId.trim()
-        val product = productDao.getProductById(cleanId)
-            ?: return@withContext Result.failure(IllegalArgumentException("Product not found"))
+        val product = productDao.getProductById(storeId, cleanId)
+            ?: return@withContext Result.failure(IllegalArgumentException("Product not found in store '$storeId'"))
 
         productDao.delete(product)
 
