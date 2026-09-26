@@ -238,6 +238,7 @@ class SupermarketRepository(
         )
 
         // Phase 13: Tenant Isolation Verification (Cross-Store Access Prevention)
+        val activeStore = currentStoreProfile.storeId
         val foreignStore = if (activeStore == "STORE_TEST_B") "STORE_TEST_A" else "STORE_TEST_B"
         if (authRepository.authService.currentUser == null || activeStore.isBlank() || activeStore == "UNAUTHENTICATED") {
             results.add(
@@ -248,8 +249,8 @@ class SupermarketRepository(
                 )
             )
         } else {
-        val isolationRes = productRepository.firestoreService.testCrossTenantRead(foreignStore)
-        if (isolationRes.isSuccess) {
+            val isolationRes = productRepository.firestoreService.testCrossTenantRead(foreignStore)
+            if (isolationRes.isSuccess) {
             results.add(
                 com.example.data.model.VerificationItem(
                     title = "Phase 13: Tenant Isolation Test",
