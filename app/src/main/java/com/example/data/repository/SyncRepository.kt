@@ -64,6 +64,8 @@ class SyncRepository(
         val syncId = "SYNC-${UUID.randomUUID().toString().take(12)}"
         var pushSuccessCount = 0
         var pullSuccessCount = 0
+        var operationFailures = 0
+        val failureMessages = mutableListOf<String>()
 
         try {
             // --- 1. Push Pending Local Products to Firestore ---
@@ -75,6 +77,9 @@ class SyncRepository(
                 if (res.isSuccess) {
                     productDao.update(p.copy(sync_status = "SYNCED"))
                     pushSuccessCount++
+                } else {
+                    operationFailures++
+                    failureMessages.add(res.exceptionOrNull()?.message ?: "Product upload failed: ${p.product_id}")
                 }
             }
 
@@ -87,6 +92,9 @@ class SyncRepository(
                 if (res.isSuccess) {
                     saleDao.update(s.copy(sync_status = "SYNCED"))
                     pushSuccessCount++
+                } else {
+                    operationFailures++
+                    failureMessages.add(res.exceptionOrNull()?.message ?: "Sale upload failed: ${s.sale_id}")
                 }
             }
 
@@ -99,6 +107,9 @@ class SyncRepository(
                 if (res.isSuccess) {
                     balanceDao.update(b.copy(sync_status = "SYNCED"))
                     pushSuccessCount++
+                } else {
+                    operationFailures++
+                    failureMessages.add(res.exceptionOrNull()?.message ?: "Ledger upload failed: ${b.id}")
                 }
             }
 
@@ -116,6 +127,9 @@ class SyncRepository(
                         pullSuccessCount++
                     }
                 }
+            } else {
+                operationFailures++
+                failureMessages.add(cloudProductsResult.exceptionOrNull()?.message ?: "Product download failed")
             }
 
             _lastSyncTimestamp.value = System.currentTimeMillis()
@@ -128,9 +142,9 @@ class SyncRepository(
                 operation = "BIDIRECTIONAL_SYNC",
                 entity_type = "STORE_DATA",
                 entity_id = storeId,
-                status = "SUCCESS",
-                error_code = null,
-                error_message = null,
+                status = if (operationFailures == 0) "SUCCESS" else "FAILED",
+                error_code = if (operationFailures == 0) null else "SYNC_PARTIAL_FAILURE",
+                error_message = failureMessages.take(5).joinToString("; ").takeIf { it.isNotBlank() },
                 timestamp = System.currentTimeMillis()
             )
             syncEventDao.insert(syncEvent)
@@ -138,14 +152,23 @@ class SyncRepository(
 
             auditLogDao.insert(
                 AuditLogEntity(
-                    action = "CLOUD_SYNC_SUCCESS",
-                    details = "Synced with stores/$storeId: $pushSuccessCount pushed, $pullSuccessCount pulled",
+                    action = if (operationFailures == 0) "CLOUD_SYNC_SUCCESS" else "CLOUD_SYNC_PARTIAL_FAILURE",
+                    details = if (operationFailures == 0) {
+                        "Synced with stores/$storeId: $pushSuccessCount pushed, $pullSuccessCount pulled"
+                    } else {
+                        "Sync incomplete for stores/$storeId: $pushSuccessCount pushed, $pullSuccessCount pulled; ${failureMessages.take(3).joinToString("; ")}"
+                    },
                     store_id = storeId,
                     user_id = userId
                 )
             )
 
-            Result.success("Synchronized successfully ($pushSuccessCount uploaded, $pullSuccessCount pulled)")
+            if (operationFailures == 0) {
+                Result.success("Synchronized successfully ($pushSuccessCount uploaded, $pullSuccessCount pulled)")
+            } else {
+                Result.failure(IllegalStateException("Sync incomplete: $operationFailures operations failed. " +
+                    failureMessages.take(3).joinToString("; ")))
+            }
         } catch (e: Exception) {
             val syncEvent = SyncEventEntity(
                 sync_id = syncId,

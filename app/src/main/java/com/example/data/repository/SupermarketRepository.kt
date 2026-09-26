@@ -202,14 +202,19 @@ class SupermarketRepository(
 
             // Phase 7: Claims Verification
             val claimsRes = authRepository.authService.getIdTokenClaims(forceRefresh = false)
-            val claims = claimsRes.getOrNull() ?: emptyMap()
-            val storeClaim = claims["store_id"] as? String ?: currentStoreProfile.storeId
-            val roleClaim = claims["role"] as? String ?: "OWNER"
+            val claims = claimsRes.getOrNull()
+            val storeClaim = claims?.get("store_id") as? String
+            val roleClaim = claims?.get("role") as? String
+            val claimsValid = !storeClaim.isNullOrBlank() && !roleClaim.isNullOrBlank()
             results.add(
                 com.example.data.model.VerificationItem(
                     title = "Phase 7: Verified Token Claims",
-                    status = "PASSED",
-                    details = "store_id: '$storeClaim', role: '$roleClaim'"
+                    status = if (claimsRes.isSuccess && claimsValid) "PASSED" else "FAILED",
+                    details = if (claimsValid) {
+                        "store_id: '$storeClaim', role: '$roleClaim'"
+                    } else {
+                        claimsRes.exceptionOrNull()?.message ?: "Required store_id and role claims are missing"
+                    }
                 )
             )
         } else {
@@ -234,6 +239,15 @@ class SupermarketRepository(
 
         // Phase 13: Tenant Isolation Verification (Cross-Store Access Prevention)
         val foreignStore = if (activeStore == "STORE_TEST_B") "STORE_TEST_A" else "STORE_TEST_B"
+        if (authRepository.authService.currentUser == null || activeStore.isBlank() || activeStore == "UNAUTHENTICATED") {
+            results.add(
+                com.example.data.model.VerificationItem(
+                    title = "Phase 13: Tenant Isolation Test",
+                    status = "WARNING",
+                    details = "Sign in to a provisioned store account before checking cross-store access."
+                )
+            )
+        } else {
         val isolationRes = productRepository.firestoreService.testCrossTenantRead(foreignStore)
         if (isolationRes.isSuccess) {
             results.add(
@@ -274,12 +288,13 @@ class SupermarketRepository(
             }
         }
 
-        // Phase 19: Secret Leak Audit
+        }
+
         results.add(
             com.example.data.model.VerificationItem(
-                title = "Phase 19: Client Secret Audit",
-                status = "PASSED",
-                details = "0 private keys, 0 service accounts, 0 privileged tokens present in application"
+                title = "Client secret review",
+                status = "WARNING",
+                details = "This client-side check cannot certify that the repository, build pipeline, or Firebase project contains no exposed secrets."
             )
         )
 
