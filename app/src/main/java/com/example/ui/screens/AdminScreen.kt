@@ -327,7 +327,7 @@ fun AdminScreen(
                                 style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold)
                             )
                             Text(
-                                text = "Automated E2E check (Auth, Firestore Read/Write, Claims & Isolation)",
+                                text = "Read-only checks (Firebase app, token claims & tenant isolation)",
                                 style = MaterialTheme.typography.labelSmall,
                                 color = Color.Gray
                             )
@@ -354,7 +354,7 @@ fun AdminScreen(
                         } else {
                             Icon(Icons.Default.Security, contentDescription = null, modifier = Modifier.size(18.dp))
                             Spacer(modifier = Modifier.width(8.dp))
-                            Text("Run Live Verification Suite")
+                            Text("Run Read-only Verification")
                         }
                     }
 

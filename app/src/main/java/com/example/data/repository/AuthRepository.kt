@@ -66,52 +66,27 @@ class AuthRepository(
             if (fbResult.isSuccess) {
                 val fbUser = fbResult.getOrThrow()
                 val uid = fbUser.uid
-                val email = fbUser.email ?: cleanIdentifier
-
-                // 1. Extract trusted token claims from Firebase JWT
+                // Membership and role must come from server-issued, verified token claims.
                 val claimsResult = authService.getIdTokenClaims(forceRefresh = true)
-                val claims = claimsResult.getOrNull() ?: emptyMap()
-                val claimStoreId = claims["store_id"] as? String
-                val claimRole = claims["role"] as? String
-
-                android.util.Log.i("AuthRepository", "Firebase login success UID: $uid")
-                if (!claimStoreId.isNullOrBlank()) {
-                    android.util.Log.i("AuthRepository", "Authenticated store: $claimStoreId")
-                    android.util.Log.i("AuthRepository", "Role: ${claimRole ?: "OWNER"}")
+                val claims = claimsResult.getOrElse {
+                    return@withContext Result.failure(IllegalStateException("Could not verify account permissions", it))
+                }
+                val finalStoreId = claims["store_id"] as? String
+                val finalRole = claims["role"] as? String
+                if (finalStoreId.isNullOrBlank() || finalRole.isNullOrBlank()) {
+                    return@withContext Result.failure(IllegalStateException("This account has not been provisioned for a store"))
                 }
 
-                // Resolve store membership (trusted token claims take priority, then Firestore doc fallback)
-                val finalStoreId: String
-                val finalRole: String
-
-                if (!claimStoreId.isNullOrBlank()) {
-                    finalStoreId = claimStoreId
-                    finalRole = claimRole ?: "OWNER"
-                } else {
-                    val profileResult = firestoreService.getUserProfile(uid)
-                    var userProfile = profileResult.getOrNull()
-                    if (userProfile == null || userProfile.storeId.isBlank()) {
-                        val defaultStoreId = "STR-" + uid.take(6).uppercase()
-                        userProfile = FirebaseUserProfile(
-                            uid = uid,
-                            email = email,
-                            storeId = defaultStoreId,
-                            role = "OWNER",
-                            displayName = cleanIdentifier.substringBefore("@")
-                        )
-                        firestoreService.saveUserProfile(userProfile)
-                    }
-                    finalStoreId = userProfile.storeId
-                    finalRole = userProfile.role
+                val localRole = when (finalRole.uppercase()) {
+                    "OWNER", "ADMIN" -> "admin"
+                    "CASHIER" -> "cashier"
+                    else -> return@withContext Result.failure(IllegalStateException("This account has an unsupported store role"))
                 }
 
-                // Load or sync store document
                 val storeDocResult = firestoreService.getStoreProfile(finalStoreId)
-                val storeDoc = storeDocResult.getOrNull() ?: FirebaseStoreDoc(
-                    storeId = finalStoreId,
-                    storeName = "Supermarket Terminal ($finalStoreId)",
-                    region = "Central District"
-                ).also { firestoreService.saveStoreProfile(it) }
+                val storeDoc = storeDocResult.getOrElse {
+                    return@withContext Result.failure(IllegalStateException("Could not load the assigned store", it))
+                } ?: return@withContext Result.failure(IllegalStateException("The assigned store is not provisioned"))
 
                 _currentStoreProfile.value = storeDoc.toStoreProfile()
 
@@ -120,7 +95,7 @@ class AuthRepository(
                     username = cleanIdentifier,
                     password_hash = "FIREBASE_MANAGED_UID_$uid",
                     salt = "FIREBASE_AUTH",
-                    role = if (finalRole.equals("cashier", ignoreCase = true)) "cashier" else "admin",
+                    role = localRole,
                     store_id = finalStoreId
                 )
                 val existingLocal = userDao.getByUsername(cleanIdentifier)
@@ -141,12 +116,15 @@ class AuthRepository(
 
                 return@withContext Result.success(localUser)
             }
+            return@withContext Result.failure(
+                fbResult.exceptionOrNull() ?: IllegalStateException("Firebase sign-in failed")
+            )
         }
 
         // 2. Validate against local Room PBKDF2 database
         val localUser = userDao.getByUsername(cleanIdentifier)
         if (localUser != null) {
-            val isValid = PasswordSecurity.verifyPassword(cleanPass, localUser.salt, localUser.password_hash)
+            val isValid = PasswordSecurity.verifyPassword(cleanPass, localUser.password_hash, localUser.salt)
             if (isValid) {
                 // Update active store profile based on local user's assigned store_id
                 _currentStoreProfile.value = StoreProfile(

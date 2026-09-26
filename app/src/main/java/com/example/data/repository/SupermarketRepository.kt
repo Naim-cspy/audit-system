@@ -30,7 +30,7 @@ class SupermarketRepository(
     private val db: AppDatabase,
     val authRepository: AuthRepository = AuthRepository(db.userDao(), db.auditLogDao()),
     val productRepository: ProductRepository = ProductRepository(db.productDao(), db.auditLogDao()),
-    val salesRepository: SalesRepository = SalesRepository(db.saleDao(), db.productDao(), db.balanceDao(), db.auditLogDao(), db.syncEventDao()),
+    val salesRepository: SalesRepository = SalesRepository(db, db.saleDao(), db.productDao(), db.balanceDao(), db.auditLogDao(), db.syncEventDao()),
     val financeRepository: FinanceRepository = FinanceRepository(db.balanceDao(), db.productDao(), db.saleDao(), db.auditLogDao(), db.syncEventDao()),
     val syncRepository: SyncRepository = SyncRepository(db.productDao(), db.saleDao(), db.balanceDao(), db.auditLogDao(), db.syncEventDao(), db.securityEventDao())
 ) {
