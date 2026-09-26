@@ -222,53 +222,15 @@ class SupermarketRepository(
             )
         }
 
-        // Phase 8, 9, 10: Single Test Product Write & Read
-        val activeStore = currentStoreProfile.storeId
-        val testDoc = com.example.data.remote.FirebaseProductDoc(
-            productId = "TEST001",
-            productName = "Test Water Bottle",
-            productPrice = 1.00,
-            amountLeft = 10,
-            amountSold = 0,
-            productType = "Drinks",
-            storeId = activeStore
+        // This suite is read-only. Firestore writes are excluded so diagnostics cannot
+        // leave test records in a customer's production store.
+        results.add(
+            com.example.data.model.VerificationItem(
+                title = "Firestore write verification",
+                status = "WARNING",
+                details = "Skipped: use the Firebase Emulator Suite for isolated write tests."
+            )
         )
-        val writeRes = productRepository.firestoreService.upsertProduct(activeStore, testDoc)
-        if (writeRes.isSuccess) {
-            results.add(
-                com.example.data.model.VerificationItem(
-                    title = "Phase 8 & 9: Firestore Write",
-                    status = "PASSED",
-                    details = "Created stores/$activeStore/products/TEST001"
-                )
-            )
-            val readRes = productRepository.firestoreService.getProduct(activeStore, "TEST001")
-            if (readRes.isSuccess && readRes.getOrNull() != null) {
-                results.add(
-                    com.example.data.model.VerificationItem(
-                        title = "Phase 10: Firestore Read",
-                        status = "PASSED",
-                        details = "Retrieved '${readRes.getOrNull()?.productName}' successfully"
-                    )
-                )
-            } else {
-                results.add(
-                    com.example.data.model.VerificationItem(
-                        title = "Phase 10: Firestore Read",
-                        status = "FAILED",
-                        details = readRes.exceptionOrNull()?.message ?: "Product document could not be read"
-                    )
-                )
-            }
-        } else {
-            results.add(
-                com.example.data.model.VerificationItem(
-                    title = "Phase 8 & 9: Firestore Write",
-                    status = "FAILED",
-                    details = "Write failed: ${writeRes.exceptionOrNull()?.message}"
-                )
-            )
-        }
 
         // Phase 13: Tenant Isolation Verification (Cross-Store Access Prevention)
         val foreignStore = if (activeStore == "STORE_TEST_B") "STORE_TEST_A" else "STORE_TEST_B"
@@ -283,7 +245,8 @@ class SupermarketRepository(
             )
         } else {
             val err = isolationRes.exceptionOrNull()?.message ?: ""
-            if (err.contains("SECURITY BREACH", ignoreCase = true)) {
+            if (err.contains("TENANT ISOLATION FAILURE", ignoreCase = true) ||
+                err.contains("SECURITY BREACH", ignoreCase = true)) {
                 results.add(
                     com.example.data.model.VerificationItem(
                         title = "Phase 13: Tenant Isolation Test",
@@ -291,12 +254,21 @@ class SupermarketRepository(
                         details = err
                     )
                 )
-            } else {
+            } else if (err.contains("PERMISSION_DENIED", ignoreCase = true) ||
+                err.contains("permission-denied", ignoreCase = true)) {
                 results.add(
                     com.example.data.model.VerificationItem(
                         title = "Phase 13: Tenant Isolation Test",
                         status = "PASSED",
-                        details = "Access blocked by security rules: $err"
+                        details = "Access blocked by security rules."
+                    )
+                )
+            } else {
+                results.add(
+                    com.example.data.model.VerificationItem(
+                        title = "Phase 13: Tenant Isolation Test",
+                        status = "WARNING",
+                        details = "Could not verify access: $err"
                     )
                 )
             }
