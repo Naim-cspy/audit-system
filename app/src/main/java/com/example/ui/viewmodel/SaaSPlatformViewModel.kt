@@ -33,20 +33,37 @@ class SaaSPlatformViewModel(
     val successNotice: StateFlow<String?> = _successNotice.asStateFlow()
 
     init {
-        // Automatically attempt load if user is a platform admin
-        if (repository.isPlatformAdmin.value) {
-            refreshMetrics()
+        // Observe authorization state: load when active, clear immediately when authorization ends
+        viewModelScope.launch {
+            repository.isPlatformAdmin.collect { isAdmin ->
+                if (isAdmin) {
+                    refreshMetrics()
+                } else {
+                    repository.platformAnalyticsRepository.clearOwnerMetrics()
+                    clearMessages()
+                }
+            }
         }
     }
 
     fun refreshMetrics() {
+        if (!repository.isPlatformAdmin.value) {
+            repository.platformAnalyticsRepository.clearOwnerMetrics()
+            _errorMessage.value = "Access Denied: Only SaaS Platform Owner can load metrics"
+            _successNotice.value = null
+            return
+        }
+
         viewModelScope.launch {
             _isLoading.value = true
             _errorMessage.value = null
+            _successNotice.value = null
             val result = repository.loadPlatformMetrics()
             result.onSuccess {
                 _successNotice.value = "Platform metrics refreshed successfully"
+                _errorMessage.value = null
             }.onFailure { ex ->
+                _successNotice.value = null
                 _errorMessage.value = ex.message ?: "Failed to load platform metrics"
             }
             _isLoading.value = false

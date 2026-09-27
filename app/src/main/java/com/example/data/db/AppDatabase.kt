@@ -85,6 +85,23 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
     }
 }
 
+val MIGRATION_4_5 = object : Migration(4, 5) {
+    override fun migrate(db: SupportSQLiteDatabase) {
+        db.execSQL(
+            """
+            CREATE TABLE IF NOT EXISTS `pending_sync_deletions` (
+                `store_id` TEXT NOT NULL,
+                `entity_type` TEXT NOT NULL,
+                `entity_id` TEXT NOT NULL,
+                `timestamp` INTEGER NOT NULL,
+                PRIMARY KEY(`store_id`, `entity_type`, `entity_id`)
+            )
+            """.trimIndent()
+        )
+        db.execSQL("CREATE INDEX IF NOT EXISTS `index_pending_sync_deletions_store_id` ON `pending_sync_deletions` (`store_id`)")
+    }
+}
+
 @Database(
     entities = [
         ProductEntity::class,
@@ -93,9 +110,10 @@ val MIGRATION_3_4 = object : Migration(3, 4) {
         AuditLogEntity::class,
         UserEntity::class,
         SyncEventEntity::class,
-        SecurityEventEntity::class
+        SecurityEventEntity::class,
+        com.example.data.model.PendingSyncDeletionEntity::class
     ],
-    version = 4,
+    version = 5,
     exportSchema = false
 )
 abstract class AppDatabase : RoomDatabase() {
@@ -106,6 +124,7 @@ abstract class AppDatabase : RoomDatabase() {
     abstract fun userDao(): UserDao
     abstract fun syncEventDao(): SyncEventDao
     abstract fun securityEventDao(): SecurityEventDao
+    abstract fun pendingSyncDeletionDao(): com.example.data.dao.PendingSyncDeletionDao
 
     companion object {
         @Volatile
@@ -118,7 +137,7 @@ abstract class AppDatabase : RoomDatabase() {
                     AppDatabase::class.java,
                     "supermarket_audit.db"
                 )
-                    .addMigrations(MIGRATION_3_4)
+                    .addMigrations(MIGRATION_3_4, MIGRATION_4_5)
                     .addCallback(DatabaseCallback(scope))
                     .build()
                 INSTANCE = instance

@@ -36,7 +36,8 @@ class AuthRepository(
     private val userDao: UserDao,
     private val auditLogDao: AuditLogDao,
     val authService: FirebaseAuthService = FirebaseAuthService(),
-    val firestoreService: FirestoreService = FirestoreService()
+    val firestoreService: FirestoreService = FirestoreService(),
+    val analyticsManager: com.example.data.analytics.AnalyticsManager? = null
 ) {
 
     private val _currentStoreProfile = MutableStateFlow(
@@ -219,6 +220,8 @@ class AuthRepository(
                 )
             )
 
+            analyticsManager?.trackLogin(uid, finalStoreId, finalRole, isSaaSOwner)
+
             return@withContext Result.success(localUser)
         }
 
@@ -263,6 +266,7 @@ class AuthRepository(
                     user_id = targetUser.username
                 )
             )
+            analyticsManager?.trackLogin(targetUser.username, targetUser.store_id, targetUser.role, false)
             return@withContext Result.success(targetUser)
         }
 
@@ -309,7 +313,7 @@ class AuthRepository(
                     role = "OWNER",
                     displayName = cleanId.substringBefore("@")
                 )
-                firestoreService.saveUserProfile(profile)
+                firestoreService.saveUserProfile(defaultStoreId, profile)
 
                 val storeDoc = FirebaseStoreDoc(
                     storeId = defaultStoreId,
@@ -456,6 +460,7 @@ class AuthRepository(
 
     fun logout() {
         authService.signOut()
+        analyticsManager?.clearAnalyticsUser()
         _isPlatformAdmin.value = false
         _currentStoreProfile.value = StoreProfile(
             storeId = "UNAUTHENTICATED",

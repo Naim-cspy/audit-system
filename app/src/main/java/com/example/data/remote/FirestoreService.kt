@@ -18,11 +18,12 @@ class FirestoreService(
     }
 ) {
 
-    // --- User Profile & Store Membership ---
+    // --- User Profile & Store Membership (stores/{storeId}/users/{uid}) ---
 
-    suspend fun getUserProfile(uid: String): Result<FirebaseUserProfile?> = suspendCancellableCoroutine { continuation ->
+    suspend fun getUserProfile(storeId: String, uid: String): Result<FirebaseUserProfile?> = suspendCancellableCoroutine { continuation ->
         try {
-            firestore.collection("users").document(uid).get()
+            firestore.collection("stores").document(storeId)
+                .collection("users").document(uid).get()
                 .addOnSuccessListener { snapshot ->
                     if (snapshot != null && snapshot.exists()) {
                         val profile = FirebaseUserProfile.fromMap(uid, snapshot.data ?: emptyMap())
@@ -39,9 +40,10 @@ class FirestoreService(
         }
     }
 
-    suspend fun saveUserProfile(profile: FirebaseUserProfile): Result<Unit> = suspendCancellableCoroutine { continuation ->
+    suspend fun saveUserProfile(storeId: String, profile: FirebaseUserProfile): Result<Unit> = suspendCancellableCoroutine { continuation ->
         try {
-            firestore.collection("users").document(profile.uid)
+            firestore.collection("stores").document(storeId)
+                .collection("users").document(profile.uid)
                 .set(profile.toMap(), SetOptions.merge())
                 .addOnSuccessListener { continuation.resume(Result.success(Unit)) }
                 .addOnFailureListener { e -> continuation.resume(Result.failure(e)) }
@@ -137,6 +139,20 @@ class FirestoreService(
         }
     }
 
+    suspend fun doesSaleExist(storeId: String, saleId: String): Result<Boolean> = suspendCancellableCoroutine { continuation ->
+        try {
+            firestore.collection("stores").document(storeId)
+                .collection("sales").document(saleId)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    continuation.resume(Result.success(snapshot != null && snapshot.exists()))
+                }
+                .addOnFailureListener { e -> continuation.resume(Result.failure(e)) }
+        } catch (e: Exception) {
+            continuation.resume(Result.failure(e))
+        }
+    }
+
     suspend fun fetchSales(storeId: String, limit: Long = 50): Result<List<FirebaseSaleDoc>> = suspendCancellableCoroutine { continuation ->
         try {
             firestore.collection("stores").document(storeId)
@@ -157,6 +173,20 @@ class FirestoreService(
     }
 
     // --- Ledger (stores/{storeId}/ledger/{ledgerId}) ---
+
+    suspend fun doesLedgerExist(storeId: String, ledgerId: String): Result<Boolean> = suspendCancellableCoroutine { continuation ->
+        try {
+            firestore.collection("stores").document(storeId)
+                .collection("ledger").document(ledgerId)
+                .get()
+                .addOnSuccessListener { snapshot ->
+                    continuation.resume(Result.success(snapshot != null && snapshot.exists()))
+                }
+                .addOnFailureListener { e -> continuation.resume(Result.failure(e)) }
+        } catch (e: Exception) {
+            continuation.resume(Result.failure(e))
+        }
+    }
 
     suspend fun recordLedger(storeId: String, ledger: FirebaseLedgerDoc): Result<Unit> = suspendCancellableCoroutine { continuation ->
         try {
@@ -266,6 +296,21 @@ class FirestoreService(
                 .set(event.toMap())
                 .addOnSuccessListener { continuation.resume(Result.success(Unit)) }
                 .addOnFailureListener { e -> continuation.resume(Result.failure(e)) }
+        } catch (e: Exception) {
+            continuation.resume(Result.failure(e))
+        }
+    }
+
+    suspend fun testPlatformAnalyticsAccess(): Result<Boolean> = suspendCancellableCoroutine { continuation ->
+        try {
+            firestore.collection("platform_analytics").document("global_summary")
+                .get()
+                .addOnSuccessListener {
+                    continuation.resume(Result.success(true))
+                }
+                .addOnFailureListener { e ->
+                    continuation.resume(Result.failure(e))
+                }
         } catch (e: Exception) {
             continuation.resume(Result.failure(e))
         }

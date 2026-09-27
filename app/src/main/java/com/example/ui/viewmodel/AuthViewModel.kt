@@ -137,6 +137,10 @@ class AuthViewModel(private val repository: SupermarketRepository) : ViewModel()
     fun clearError() {
         _loginError.value = null
     }
+
+    fun trackScreen(screenName: String) {
+        repository.analyticsManager?.trackScreenView(screenName)
+    }
 }
 
 class AuthViewModelFactory(private val repository: SupermarketRepository) : ViewModelProvider.Factory {

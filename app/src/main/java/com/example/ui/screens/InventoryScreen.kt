@@ -68,8 +68,12 @@ import com.example.ui.viewmodel.AdminViewModel
 @Composable
 fun InventoryScreen(
     adminViewModel: AdminViewModel,
+    userRole: String? = null,
     modifier: Modifier = Modifier
 ) {
+    val roleUpper = (userRole ?: "ADMIN").trim().uppercase()
+    val canManageInventory = roleUpper in setOf("OWNER", "ADMIN", "MANAGER", "INVENTORY", "SAAS_OWNER")
+
     val products by adminViewModel.allProducts.collectAsState()
     val stockWarnings by adminViewModel.stockWarnings.collectAsState()
     val operationMessage by adminViewModel.operationMessage.collectAsState()
@@ -97,13 +101,15 @@ fun InventoryScreen(
     Scaffold(
         modifier = modifier.fillMaxSize(),
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { showAddDialog = true },
-                containerColor = SupermarketGreen,
-                contentColor = Color.White,
-                modifier = Modifier.testTag("add_product_fab")
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Add Product")
+            if (canManageInventory) {
+                FloatingActionButton(
+                    onClick = { showAddDialog = true },
+                    containerColor = SupermarketGreen,
+                    contentColor = Color.White,
+                    modifier = Modifier.testTag("add_product_fab")
+                ) {
+                    Icon(Icons.Default.Add, contentDescription = "Add Product")
+                }
             }
         }
     ) { innerPadding ->
@@ -254,6 +260,7 @@ fun InventoryScreen(
                 items(filteredProducts, key = { it.product_id }) { product ->
                     ProductCard(
                         product = product,
+                        canManageInventory = canManageInventory,
                         onEditPrice = { editingProduct = product },
                         onDelete = { deletingProduct = product }
                     )
@@ -321,6 +328,7 @@ fun InventoryScreen(
 @Composable
 fun ProductCard(
     product: ProductEntity,
+    canManageInventory: Boolean = true,
     onEditPrice: () -> Unit,
     onDelete: () -> Unit
 ) {
@@ -414,18 +422,20 @@ fun ProductCard(
                     )
                 }
 
-                Row {
-                    IconButton(
-                        onClick = onEditPrice,
-                        modifier = Modifier.size(36.dp).testTag("edit_price_${product.product_id}")
-                    ) {
-                        Icon(Icons.Default.Edit, contentDescription = "Edit Price", tint = AccentBlue, modifier = Modifier.size(18.dp))
-                    }
-                    IconButton(
-                        onClick = onDelete,
-                        modifier = Modifier.size(36.dp).testTag("delete_product_${product.product_id}")
-                    ) {
-                        Icon(Icons.Default.Delete, contentDescription = "Delete Product", tint = CriticalRed, modifier = Modifier.size(18.dp))
+                if (canManageInventory) {
+                    Row {
+                        IconButton(
+                            onClick = onEditPrice,
+                            modifier = Modifier.size(36.dp).testTag("edit_price_${product.product_id}")
+                        ) {
+                            Icon(Icons.Default.Edit, contentDescription = "Edit Price", tint = AccentBlue, modifier = Modifier.size(18.dp))
+                        }
+                        IconButton(
+                            onClick = onDelete,
+                            modifier = Modifier.size(36.dp).testTag("delete_product_${product.product_id}")
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Product", tint = CriticalRed, modifier = Modifier.size(18.dp))
+                        }
                     }
                 }
             }

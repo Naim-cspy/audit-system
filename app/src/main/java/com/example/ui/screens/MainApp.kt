@@ -71,6 +71,10 @@ fun MainApp(
     var selectedTab by remember { mutableStateOf(AppTab.POS) }
     var showSaaSOwnerDashboard by remember { mutableStateOf(false) }
 
+    androidx.compose.runtime.LaunchedEffect(selectedTab) {
+        authViewModel.trackScreen("Screen_${selectedTab.name}")
+    }
+
     if (currentUser == null) {
         LoginScreen(authViewModel = authViewModel)
         return
@@ -202,8 +206,14 @@ fun MainApp(
         ) {
             when (selectedTab) {
                 AppTab.POS -> PosScreen(viewModel = posViewModel)
-                AppTab.INVENTORY -> InventoryScreen(adminViewModel = adminViewModel)
-                AppTab.FINANCE -> FinanceScreen(adminViewModel = adminViewModel)
+                AppTab.INVENTORY -> InventoryScreen(
+                    adminViewModel = adminViewModel,
+                    userRole = currentUser?.role
+                )
+                AppTab.FINANCE -> FinanceScreen(
+                    adminViewModel = adminViewModel,
+                    userRole = currentUser?.role
+                )
                 AppTab.FORECAST -> AnalyticsScreen(adminViewModel = adminViewModel)
                 AppTab.ADMIN -> AdminScreen(
                     authViewModel = authViewModel,

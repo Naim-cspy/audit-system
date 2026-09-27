@@ -1,8 +1,11 @@
 package com.example.data.repository
 
+import com.example.data.analytics.AnalyticsManager
 import com.example.data.dao.AuditLogDao
+import com.example.data.dao.PendingSyncDeletionDao
 import com.example.data.dao.ProductDao
 import com.example.data.model.AuditLogEntity
+import com.example.data.model.PendingSyncDeletionEntity
 import com.example.data.model.ProductEntity
 import com.example.data.remote.FirebaseProductDoc
 import com.example.data.remote.FirestoreService
@@ -18,7 +21,9 @@ import kotlinx.coroutines.withContext
 class ProductRepository(
     private val productDao: ProductDao,
     private val auditLogDao: AuditLogDao,
-    val firestoreService: FirestoreService = FirestoreService()
+    private val pendingSyncDeletionDao: PendingSyncDeletionDao? = null,
+    val firestoreService: FirestoreService = FirestoreService(),
+    val analyticsManager: AnalyticsManager? = null
 ) {
 
     fun getAllProducts(storeId: String): Flow<List<ProductEntity>> {
@@ -100,6 +105,7 @@ class ProductRepository(
                 store_id = storeId
             )
         )
+        analyticsManager?.trackInventoryUpdate(storeId, "ADD_PRODUCT", cleanId)
 
         Result.success(Unit)
     }
@@ -136,6 +142,7 @@ class ProductRepository(
                 store_id = storeId
             )
         )
+        analyticsManager?.trackInventoryUpdate(storeId, "UPDATE_PRICE", cleanId)
 
         Result.success(Unit)
     }
@@ -147,8 +154,21 @@ class ProductRepository(
 
         productDao.delete(product)
 
-        // Remove from Firestore
-        firestoreService.deleteProduct(storeId, cleanId)
+        // Durable deletion queue ensures deletions survive network loss and restarts
+        pendingSyncDeletionDao?.insert(
+            PendingSyncDeletionEntity(
+                store_id = storeId,
+                entity_type = "PRODUCT",
+                entity_id = cleanId,
+                timestamp = System.currentTimeMillis()
+            )
+        )
+
+        // Attempt immediate Firestore removal
+        val cloudResult = firestoreService.deleteProduct(storeId, cleanId)
+        if (cloudResult.isSuccess) {
+            pendingSyncDeletionDao?.deleteById(storeId, "PRODUCT", cleanId)
+        }
 
         auditLogDao.insert(
             AuditLogEntity(
@@ -157,6 +177,7 @@ class ProductRepository(
                 store_id = storeId
             )
         )
+        analyticsManager?.trackInventoryUpdate(storeId, "DELETE_PRODUCT", cleanId)
 
         Result.success(Unit)
     }

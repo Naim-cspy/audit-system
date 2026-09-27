@@ -1,0 +1,23 @@
+{
+  "name": "supermarket-pos-server-provisioning",
+  "version": "1.0.0",
+  "description": "Trusted server-side provisioning engine using Firebase Admin SDK for multi-tenant Supermarket POS & Audit System",
+  "main": "provision_saas_owner.js",
+  "scripts": {
+    "provision-saas-owner": "node provision_saas_owner.js",
+    "provision-store": "node provision_tenant_store.js",
+    "manage-employee": "node manage_store_employee.js",
+    "aggregate-metrics": "node aggregate_platform_metrics.js",
+    "fetch-ga4": "node fetch_ga4_reporting.js",
+    "test-rules": "node test_security_rules.js"
+  },
+  "dependencies": {
+    "firebase-admin": "^12.0.0"
+  },
+  "devDependencies": {
+    "@firebase/rules-unit-testing": "^3.0.0"
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

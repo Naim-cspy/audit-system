@@ -174,6 +174,26 @@ fun SaaSPlatformOwnerScreen(
             return@Scaffold
         }
 
+        if (platformMetrics == null && isLoading) {
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(innerPadding),
+                contentAlignment = Alignment.Center
+            ) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    CircularProgressIndicator(color = AccentBlue, strokeWidth = 3.dp)
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Loading SaaS telemetry...",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Gray
+                    )
+                }
+            }
+            return@Scaffold
+        }
+
         val metrics = platformMetrics ?: PlatformMetricsSummary()
 
         LazyColumn(
@@ -231,6 +251,35 @@ fun SaaSPlatformOwnerScreen(
                 }
             }
 
+            // Empty State Notice if No Stores
+            if (metrics.totalStores == 0 && !isLoading) {
+                item {
+                    ElevatedCard(
+                        shape = RoundedCornerShape(12.dp),
+                        colors = CardDefaults.elevatedCardColors(containerColor = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.6f)),
+                        modifier = Modifier.fillMaxWidth().testTag("saas_empty_stores_card")
+                    ) {
+                        Column(
+                            modifier = Modifier.padding(20.dp),
+                            horizontalAlignment = Alignment.CenterHorizontally
+                        ) {
+                            Icon(Icons.Default.Storefront, contentDescription = null, tint = Color.Gray, modifier = Modifier.size(40.dp))
+                            Spacer(modifier = Modifier.height(10.dp))
+                            Text(
+                                text = "No Tenant Stores Provisioned",
+                                style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold)
+                            )
+                            Spacer(modifier = Modifier.height(4.dp))
+                            Text(
+                                text = "Run the Firebase Admin SDK provisioning script to register client stores and assign authorized store memberships.",
+                                style = MaterialTheme.typography.bodySmall,
+                                color = Color.Gray
+                            )
+                        }
+                    }
+                }
+            }
+
             // Overview Header Card
             item {
                 ElevatedCard(
@@ -254,6 +303,12 @@ fun SaaSPlatformOwnerScreen(
                                     style = MaterialTheme.typography.labelSmall,
                                     color = Color.Gray
                                 )
+                                Spacer(modifier = Modifier.height(2.dp))
+                                Text(
+                                    text = "Last updated: ${dateFormat.format(Date(metrics.lastUpdated))}",
+                                    style = MaterialTheme.typography.labelSmall.copy(fontWeight = FontWeight.SemiBold),
+                                    color = AccentBlue
+                                )
                             }
                             Icon(Icons.Default.Analytics, contentDescription = null, tint = AccentBlue)
                         }
@@ -265,7 +320,7 @@ fun SaaSPlatformOwnerScreen(
                         Row(modifier = Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
                             MetricStatItem(
                                 label = "Total Stores",
-                                value = metrics.totalStores.toString(),
+                                value = if (metrics.activeStores > 0) "${metrics.totalStores} (${metrics.activeStores} active)" else metrics.totalStores.toString(),
                                 icon = Icons.Default.Storefront
                             )
                             MetricStatItem(
@@ -274,8 +329,12 @@ fun SaaSPlatformOwnerScreen(
                                 icon = Icons.Default.People
                             )
                             MetricStatItem(
-                                label = "Global Sessions",
-                                value = metrics.totalSessionsCount.toString(),
+                                label = "GA4 Sessions",
+                                value = if (metrics.gaReportingConfigured && metrics.totalSessionsCount != null) {
+                                    metrics.totalSessionsCount.toString()
+                                } else {
+                                    "Not configured"
+                                },
                                 icon = Icons.Default.Devices
                             )
                         }
@@ -334,10 +393,10 @@ fun SaaSPlatformOwnerScreen(
                 }
             }
 
-            // Most-Used App Features
+            // Google Analytics 4 Feature Usage Telemetry
             item {
                 Text(
-                    text = "Most-Used Features & App Usage Telemetry",
+                    text = "App Feature Usage (Google Analytics 4)",
                     style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.Bold),
                     color = MaterialTheme.colorScheme.primary
                 )
@@ -349,46 +408,62 @@ fun SaaSPlatformOwnerScreen(
                     modifier = Modifier.fillMaxWidth().testTag("feature_usage_card")
                 ) {
                     Column(modifier = Modifier.padding(16.dp)) {
-                        val features = if (metrics.featureUsageMap.isNotEmpty()) {
-                            metrics.featureUsageMap.toList().sortedByDescending { it.second }
-                        } else {
-                            listOf(
-                                "POS Checkout" to 142L,
-                                "Inventory Stocking" to 89L,
-                                "Predictive AI Forecast" to 54L,
-                                "Ledger Reconciliation" to 38L,
-                                "Cloud Replication Engine" to 95L,
-                                "Audit Log Export" to 22L
-                            )
-                        }
+                        if (metrics.gaReportingConfigured && metrics.featureUsageMap.isNotEmpty()) {
+                            val features = metrics.featureUsageMap.toList().sortedByDescending { it.second }
+                            val maxUsage = features.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 100L
 
-                        val maxUsage = features.maxOfOrNull { it.second }?.coerceAtLeast(1L) ?: 100L
-
-                        features.forEach { (feature, count) ->
-                            Column(modifier = Modifier.padding(vertical = 6.dp)) {
-                                Row(
-                                    modifier = Modifier.fillMaxWidth(),
-                                    horizontalArrangement = Arrangement.SpaceBetween,
-                                    verticalAlignment = Alignment.CenterVertically
-                                ) {
-                                    Text(
-                                        text = feature,
-                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                            features.forEach { (feature, count) ->
+                                Column(modifier = Modifier.padding(vertical = 6.dp)) {
+                                    Row(
+                                        modifier = Modifier.fillMaxWidth(),
+                                        horizontalArrangement = Arrangement.SpaceBetween,
+                                        verticalAlignment = Alignment.CenterVertically
+                                    ) {
+                                        Text(
+                                            text = feature,
+                                            style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.SemiBold)
+                                        )
+                                        Text(
+                                            text = "$count uses",
+                                            style = MaterialTheme.typography.labelMedium,
+                                            color = Color.Gray
+                                        )
+                                    }
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    val progress = (count.toFloat() / maxUsage.toFloat()).coerceIn(0f, 1f)
+                                    LinearProgressIndicator(
+                                        progress = { progress },
+                                        modifier = Modifier.fillMaxWidth().height(6.dp),
+                                        color = AccentBlue,
+                                        trackColor = AccentBlue.copy(alpha = 0.15f)
                                     )
+                                }
+                            }
+                        } else {
+                            Row(
+                                modifier = Modifier.fillMaxWidth(),
+                                verticalAlignment = Alignment.CenterVertically
+                            ) {
+                                Icon(
+                                    imageVector = Icons.Default.Info,
+                                    contentDescription = null,
+                                    tint = AccentBlue,
+                                    modifier = Modifier.size(24.dp)
+                                )
+                                Spacer(modifier = Modifier.width(10.dp))
+                                Column {
                                     Text(
-                                        text = "$count uses",
-                                        style = MaterialTheme.typography.labelMedium,
+                                        text = "Server-Side GA4 Reporting: Not configured",
+                                        style = MaterialTheme.typography.bodyMedium.copy(fontWeight = FontWeight.Bold),
+                                        color = MaterialTheme.colorScheme.onSurface
+                                    )
+                                    Spacer(modifier = Modifier.height(4.dp))
+                                    Text(
+                                        text = "Client event collection is active via Firebase Analytics SDK (DebugView verifiable). Run server_provisioning/fetch_ga4_reporting.js with GA4_PROPERTY_ID to sync dashboard usage reports.",
+                                        style = MaterialTheme.typography.bodySmall,
                                         color = Color.Gray
                                     )
                                 }
-                                Spacer(modifier = Modifier.height(4.dp))
-                                val progress = (count.toFloat() / maxUsage.toFloat()).coerceIn(0f, 1f)
-                                LinearProgressIndicator(
-                                    progress = { progress },
-                                    modifier = Modifier.fillMaxWidth().height(6.dp),
-                                    color = AccentBlue,
-                                    trackColor = AccentBlue.copy(alpha = 0.15f)
-                                )
                             }
                         }
                     }

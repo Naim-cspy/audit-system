@@ -1,10 +1,12 @@
 package com.example.data.repository
 
+import com.example.data.analytics.AnalyticsManager
 import com.example.data.dao.AuditLogDao
 import com.example.data.dao.BalanceDao
 import com.example.data.dao.ProductDao
 import com.example.data.dao.SaleDao
 import com.example.data.dao.SyncEventDao
+import com.example.data.db.AppDatabase
 import com.example.data.model.AuditLogEntity
 import com.example.data.model.BalanceEntity
 import com.example.data.model.CartItem
@@ -34,7 +36,9 @@ class SalesRepository(
     private val balanceDao: BalanceDao,
     private val auditLogDao: AuditLogDao,
     private val syncEventDao: SyncEventDao,
-    private val firestoreService: FirestoreService = FirestoreService()
+    private val appDatabase: AppDatabase? = null,
+    private val firestoreService: FirestoreService = FirestoreService(),
+    private val analyticsManager: AnalyticsManager? = null
 ) {
 
     fun getRecentSales(storeId: String, limit: Int = 15): Flow<List<SaleEntity>> {
@@ -87,21 +91,9 @@ class SalesRepository(
         val receiptId = "REC-${UUID.randomUUID().toString().take(8).uppercase()}"
         val salesToInsert = mutableListOf<SaleEntity>()
 
-        // 2. Decrement stock & prepare sales records
+        // Prepare sales records
         for (item in cartItems) {
             val freshProduct = productDao.getProductById(storeId, item.product.product_id)!!
-            val newAmountLeft = freshProduct.product_amount_left - item.quantity
-            val newAmountSold = freshProduct.product_amount_sold + item.quantity
-
-            val updatedProduct = freshProduct.copy(
-                product_amount_left = newAmountLeft,
-                product_amount_sold = newAmountSold,
-                date_sold = todayStr,
-                updated_at = nowMs,
-                sync_status = "PENDING"
-            )
-            productDao.update(updatedProduct)
-
             val sale = SaleEntity(
                 sale_id = "SALE-${UUID.randomUUID().toString().take(10).uppercase()}",
                 product_id = freshProduct.product_id,
@@ -118,42 +110,75 @@ class SalesRepository(
             salesToInsert.add(sale)
         }
 
-        // 3. Insert sales into local Room cache
-        salesToInsert.forEach { saleDao.insert(it) }
+        // 2. Commit stock decrements, sale rows, financial ledger, and audit log ATOMICALLY in Room
+        val commitLocally = Runnable {
+            for (item in cartItems) {
+                val freshProduct = productDao.getProductById(storeId, item.product.product_id)!!
+                val newAmountLeft = freshProduct.product_amount_left - item.quantity
+                val newAmountSold = freshProduct.product_amount_sold + item.quantity
 
-        // 4. Update Financial Ledger
-        val lastBalance = balanceDao.getLatestBalance(storeId)
-        val startingBudget = lastBalance?.budget_starting ?: 5000.0
-        val newBalance = BalanceEntity(
-            date = todayStr,
-            budget_starting = startingBudget,
-            money_in = totalAmount,
-            money_out = 0.0,
-            reason = "POS Sale ($receiptId)",
-            store_id = storeId,
-            sync_status = "PENDING",
-            created_at = nowMs
-        )
-        balanceDao.insert(newBalance)
+                val updatedProduct = freshProduct.copy(
+                    product_amount_left = newAmountLeft,
+                    product_amount_sold = newAmountSold,
+                    date_sold = todayStr,
+                    updated_at = nowMs,
+                    sync_status = "PENDING"
+                )
+                productDao.update(updatedProduct)
+            }
 
-        // 5. Insert Audit Log
-        val audit = AuditLogEntity(
-            action = "POS_CHECKOUT",
-            details = "Receipt $receiptId: ${salesToInsert.size} items, total \$${"%.2f".format(totalAmount)}",
-            store_id = storeId,
-            user_id = cashierId,
-            timestamp = nowMs
-        )
-        auditLogDao.insert(audit)
+            salesToInsert.forEach { saleDao.insert(it) }
 
-        // 6. Push Sales & Sync Events to Cloud Firestore
+            val lastBalance = balanceDao.getLatestBalance(storeId)
+            val startingBudget = lastBalance?.budget_starting ?: 5000.0
+            val newBalance = BalanceEntity(
+                date = todayStr,
+                budget_starting = startingBudget,
+                money_in = totalAmount,
+                money_out = 0.0,
+                reason = "POS Sale ($receiptId)",
+                store_id = storeId,
+                sync_status = "PENDING",
+                created_at = nowMs
+            )
+            balanceDao.insert(newBalance)
+
+            val audit = AuditLogEntity(
+                action = "POS_CHECKOUT",
+                details = "Receipt $receiptId: ${salesToInsert.size} items, total \$${"%.2f".format(totalAmount)}",
+                store_id = storeId,
+                user_id = cashierId,
+                timestamp = nowMs
+            )
+            auditLogDao.insert(audit)
+        }
+
+        if (appDatabase != null) {
+            appDatabase.runInTransaction(commitLocally)
+        } else {
+            commitLocally.run()
+        }
+
+        // 3. Track Purchase Event in Firebase Analytics with documented item array & transaction ID
+        analyticsManager?.trackPurchase(storeId, receiptId, totalAmount, cartItems)
+
+        // 4. Idempotently Push Sales & Sync Events to Cloud Firestore
         val syncId = "SYNC-${UUID.randomUUID().toString().take(12)}"
         var cloudSuccess = true
 
         for (sale in salesToInsert) {
-            val cloudSale = FirebaseSaleDoc.fromEntity(sale)
-            val res = firestoreService.recordSale(storeId, cloudSale)
-            if (!res.isSuccess) cloudSuccess = false
+            val exists = firestoreService.doesSaleExist(storeId, sale.sale_id).getOrDefault(false)
+            if (exists) {
+                saleDao.update(sale.copy(sync_status = "SYNCED"))
+            } else {
+                val cloudSale = FirebaseSaleDoc.fromEntity(sale)
+                val res = firestoreService.recordSale(storeId, cloudSale)
+                if (res.isSuccess) {
+                    saleDao.update(sale.copy(sync_status = "SYNCED"))
+                } else {
+                    cloudSuccess = false
+                }
+            }
         }
 
         val syncStatus = if (cloudSuccess) "SUCCESS" else "PENDING"
@@ -173,7 +198,6 @@ class SalesRepository(
         syncEventDao.insert(syncEvent)
 
         if (cloudSuccess) {
-            salesToInsert.forEach { saleDao.update(it.copy(sync_status = "SYNCED")) }
             firestoreService.recordSyncEvent(storeId, FirebaseSyncEventDoc.fromEntity(syncEvent))
         }
 

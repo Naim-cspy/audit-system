@@ -30,15 +30,18 @@ class PlatformAnalyticsService(
                 .addOnSuccessListener { snapshot ->
                     if (snapshot.exists()) {
                         val data = snapshot.data ?: emptyMap()
-                        val totalStores = (data["total_stores"] as? Long)?.toInt() ?: 1
-                        val totalUsers = (data["total_users"] as? Long)?.toInt() ?: 1
+                        val totalStores = (data["total_stores"] as? Long)?.toInt() ?: 0
+                        val activeStores = (data["active_stores"] as? Long)?.toInt() ?: 0
+                        val totalUsers = (data["total_users"] as? Long)?.toInt() ?: 0
                         val totalSalesUsd = (data["total_sales_volume_usd"] as? Double)
                             ?: ((data["total_sales_volume_usd"] as? Long)?.toDouble() ?: 0.0)
                         val totalTx = (data["total_transactions_count"] as? Long)?.toInt() ?: 0
                         val totalSkus = (data["total_inventory_skus"] as? Long)?.toInt() ?: 0
                         val lowStock = (data["total_low_stock_alerts"] as? Long)?.toInt() ?: 0
                         val auditCount = (data["total_audit_events"] as? Long)?.toInt() ?: 0
-                        val sessions = (data["total_sessions_count"] as? Long)?.toInt() ?: 1
+                        val sessions = (data["total_sessions_count"] as? Long)?.toInt()
+                        val logins = (data["total_logins_count"] as? Long)?.toInt()
+                        val gaConfigured = (data["ga_reporting_configured"] as? Boolean) ?: (sessions != null)
                         val suspicious = (data["suspicious_events_count"] as? Long)?.toInt() ?: 0
 
                         @Suppress("UNCHECKED_CAST")
@@ -48,6 +51,7 @@ class PlatformAnalyticsService(
                             Result.success(
                                 PlatformMetricsSummary(
                                     totalStores = totalStores,
+                                    activeStores = activeStores,
                                     totalUsers = totalUsers,
                                     totalSalesVolumeUsd = totalSalesUsd,
                                     totalTransactionsCount = totalTx,
@@ -55,6 +59,8 @@ class PlatformAnalyticsService(
                                     totalLowStockAlerts = lowStock,
                                     totalAuditEventsCount = auditCount,
                                     totalSessionsCount = sessions,
+                                    totalLoginsCount = logins,
+                                    gaReportingConfigured = gaConfigured,
                                     featureUsageMap = featureUsageRaw,
                                     suspiciousEventsCount = suspicious,
                                     lastUpdated = snapshot.getTimestamp("last_updated")?.toDate()?.time ?: System.currentTimeMillis()
@@ -62,8 +68,28 @@ class PlatformAnalyticsService(
                             )
                         )
                     } else {
-                        // Return default baseline if document has not yet been initialized by SaaS admin
-                        continuation.resume(Result.success(createBaselinePlatformSummary()))
+                        // Return genuine empty platform summary when document is not initialized
+                        continuation.resume(
+                            Result.success(
+                                PlatformMetricsSummary(
+                                    totalStores = 0,
+                                    activeStores = 0,
+                                    totalUsers = 0,
+                                    totalSalesVolumeUsd = 0.0,
+                                    totalTransactionsCount = 0,
+                                    totalInventorySkus = 0,
+                                    totalLowStockAlerts = 0,
+                                    totalAuditEventsCount = 0,
+                                    totalSessionsCount = null,
+                                    totalLoginsCount = null,
+                                    gaReportingConfigured = false,
+                                    featureUsageMap = emptyMap(),
+                                    suspiciousEventsCount = 0,
+                                    storesList = emptyList(),
+                                    lastUpdated = System.currentTimeMillis()
+                                )
+                            )
+                        )
                     }
                 }
                 .addOnFailureListener { exception ->
@@ -90,6 +116,7 @@ class PlatformAnalyticsService(
         try {
             val map = hashMapOf(
                 "total_stores" to summary.totalStores,
+                "active_stores" to summary.activeStores,
                 "total_users" to summary.totalUsers,
                 "total_sales_volume_usd" to summary.totalSalesVolumeUsd,
                 "total_transactions_count" to summary.totalTransactionsCount,
@@ -97,6 +124,8 @@ class PlatformAnalyticsService(
                 "total_low_stock_alerts" to summary.totalLowStockAlerts,
                 "total_audit_events" to summary.totalAuditEventsCount,
                 "total_sessions_count" to summary.totalSessionsCount,
+                "total_logins_count" to summary.totalLoginsCount,
+                "ga_reporting_configured" to summary.gaReportingConfigured,
                 "suspicious_events_count" to summary.suspiciousEventsCount,
                 "feature_usage" to summary.featureUsageMap,
                 "last_updated" to com.google.firebase.Timestamp.now()
@@ -178,39 +207,6 @@ class PlatformAnalyticsService(
         } catch (e: Exception) {
             continuation.resume(Result.failure(e))
         }
-    }
-
-    private fun createBaselinePlatformSummary(): PlatformMetricsSummary {
-        return PlatformMetricsSummary(
-            totalStores = 1,
-            totalUsers = 2,
-            totalSalesVolumeUsd = 0.0,
-            totalTransactionsCount = 0,
-            totalInventorySkus = 0,
-            totalLowStockAlerts = 0,
-            totalAuditEventsCount = 0,
-            totalSessionsCount = 1,
-            featureUsageMap = mapOf(
-                "POS Checkout" to 0L,
-                "Barcode Scanner" to 0L,
-                "Inventory Stocking" to 0L,
-                "Predictive AI Forecast" to 0L,
-                "Ledger Reconciliation" to 0L,
-                "Cloud Sync Engine" to 0L
-            ),
-            suspiciousEventsCount = 0,
-            storesList = listOf(
-                StorePlatformSummary(
-                    storeId = "STR-LBN-NAB-001",
-                    storeName = "Al-Makhzen Supermarket",
-                    region = "Nabatieh, Lebanon",
-                    subscriptionStatus = "ACTIVE",
-                    userCount = 3,
-                    salesCount = 0,
-                    revenueUsd = 0.0
-                )
-            )
-        )
     }
 
     companion object {

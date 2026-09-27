@@ -55,6 +55,7 @@ class PlatformAnalyticsRepository(
      */
     suspend fun loadPlatformMetrics(): Result<PlatformMetricsSummary> = withContext(Dispatchers.IO) {
         if (!isPlatformOwnerAuthorized()) {
+            clearOwnerMetrics()
             val err = "ACCESS_DENIED: User is not authorized as SaaS Platform Owner. Client tenants cannot access global analytics."
             _errorMessage.value = err
             return@withContext Result.failure(SecurityException(err))
@@ -77,13 +78,13 @@ class PlatformAnalyticsRepository(
             val storesResult = platformService.getRegisteredStores()
             val storesList = storesResult.getOrNull() ?: emptyList()
 
-            // 4. Combine with verified platform aggregates
+            // 4. Combine with verified platform aggregates (never fabricate non-zero stores or fake figures)
             val combinedSummary = baseSummary.copy(
-                totalStores = if (storesList.isNotEmpty()) storesList.size else baseSummary.totalStores.coerceAtLeast(1),
-                suspiciousEventsCount = secEvents.size.coerceAtLeast(baseSummary.suspiciousEventsCount),
+                totalStores = if (baseSummary.totalStores > 0) baseSummary.totalStores else storesList.size,
+                suspiciousEventsCount = if (secEvents.isNotEmpty()) secEvents.size else baseSummary.suspiciousEventsCount,
                 suspiciousEvents = secEvents,
                 storesList = storesList,
-                lastUpdated = System.currentTimeMillis()
+                lastUpdated = if (baseSummary.lastUpdated > 0) baseSummary.lastUpdated else System.currentTimeMillis()
             )
 
             _platformMetrics.value = combinedSummary
@@ -94,6 +95,16 @@ class PlatformAnalyticsRepository(
         } finally {
             _isLoading.value = false
         }
+    }
+
+    /**
+     * Clears previously loaded owner metrics immediately when session or authorization ends.
+     */
+    fun clearOwnerMetrics() {
+        _platformMetrics.value = null
+        _securityAlerts.value = emptyList()
+        _errorMessage.value = null
+        _isLoading.value = false
     }
 
     /**

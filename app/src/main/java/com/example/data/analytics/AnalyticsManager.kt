@@ -30,10 +30,43 @@ class AnalyticsManager(context: Context) {
                 putBoolean("is_platform_admin", isPlatformAdmin)
             }
             firebaseAnalytics?.logEvent(FirebaseAnalytics.Event.LOGIN, bundle)
-            firebaseAnalytics?.setUserProperty("store_id", storeId)
-            firebaseAnalytics?.setUserProperty("role", role)
+            setAnalyticsUser(userId, storeId, role, isPlatformAdmin)
         } catch (e: Exception) {
             Log.e(TAG, "Error tracking login event: ${e.message}")
+        }
+    }
+
+    fun setAnalyticsUser(userId: String?, storeId: String?, role: String?, isPlatformAdmin: Boolean) {
+        try {
+            firebaseAnalytics?.setUserId(userId)
+            firebaseAnalytics?.setUserProperty("store_id", storeId ?: "NONE")
+            firebaseAnalytics?.setUserProperty("user_role", role ?: "NONE")
+            firebaseAnalytics?.setUserProperty("is_platform_admin", isPlatformAdmin.toString())
+        } catch (e: Exception) {
+            Log.e(TAG, "Error setting user properties: ${e.message}")
+        }
+    }
+
+    fun clearAnalyticsUser() {
+        try {
+            firebaseAnalytics?.setUserId(null)
+            firebaseAnalytics?.setUserProperty("store_id", null)
+            firebaseAnalytics?.setUserProperty("user_role", null)
+            firebaseAnalytics?.setUserProperty("is_platform_admin", null)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error clearing analytics user: ${e.message}")
+        }
+    }
+
+    fun trackScreenView(screenName: String, screenClass: String = screenName) {
+        try {
+            val bundle = Bundle().apply {
+                putString(FirebaseAnalytics.Param.SCREEN_NAME, screenName)
+                putString(FirebaseAnalytics.Param.SCREEN_CLASS, screenClass)
+            }
+            firebaseAnalytics?.logEvent(FirebaseAnalytics.Event.SCREEN_VIEW, bundle)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error tracking screen view: ${e.message}")
         }
     }
 
@@ -50,12 +83,28 @@ class AnalyticsManager(context: Context) {
         }
     }
 
-    fun trackSale(storeId: String, totalAmountUsd: Double, itemCount: Int) {
+    fun trackPurchase(
+        storeId: String,
+        transactionId: String,
+        totalAmountUsd: Double,
+        items: List<com.example.data.model.CartItem>
+    ) {
         try {
+            val itemBundles = items.map { item ->
+                Bundle().apply {
+                    putString(FirebaseAnalytics.Param.ITEM_ID, item.product.product_id)
+                    putString(FirebaseAnalytics.Param.ITEM_NAME, item.product.product_name)
+                    putString(FirebaseAnalytics.Param.ITEM_CATEGORY, item.product.product_type)
+                    putDouble(FirebaseAnalytics.Param.PRICE, item.product.product_price)
+                    putLong(FirebaseAnalytics.Param.QUANTITY, item.quantity.toLong())
+                }
+            }.toTypedArray()
+
             val bundle = Bundle().apply {
+                putString(FirebaseAnalytics.Param.TRANSACTION_ID, transactionId)
                 putString(FirebaseAnalytics.Param.CURRENCY, "USD")
                 putDouble(FirebaseAnalytics.Param.VALUE, totalAmountUsd)
-                putLong(FirebaseAnalytics.Param.ITEMS, itemCount.toLong())
+                putParcelableArray(FirebaseAnalytics.Param.ITEMS, itemBundles)
                 putString("store_id", storeId)
             }
             firebaseAnalytics?.logEvent(FirebaseAnalytics.Event.PURCHASE, bundle)

@@ -93,8 +93,11 @@ fun AdminScreen(
     var selectedSyncFilter by remember { mutableStateOf("ALL") }
     var statusFeedback by remember { mutableStateOf<String?>(null) }
 
-    // Role check: If not admin, show access denied
-    if (currentUser?.role != "admin") {
+    val currentRole = currentUser?.role?.trim()?.uppercase() ?: ""
+    val hasAdminPrivileges = currentRole == "ADMIN" || currentRole == "OWNER" || currentRole == "SAAS_OWNER"
+
+    // Role check: If not admin/owner, show access denied
+    if (!hasAdminPrivileges) {
         Box(
             modifier = modifier.fillMaxSize().padding(24.dp),
             contentAlignment = Alignment.Center
@@ -121,7 +124,7 @@ fun AdminScreen(
                     )
                     Spacer(modifier = Modifier.height(8.dp))
                     Text(
-                        text = "Your account (${currentUser?.username}) has the role '${currentUser?.role}'. The Admin Intelligence Center requires Administrator privileges.",
+                        text = "Your account (${currentUser?.username}) has the role '${currentUser?.role}'. The Admin Intelligence Center requires Store Administrator or Owner privileges.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = Color.Gray
                     )

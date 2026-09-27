@@ -1,76 +1,116 @@
-# Supermarket POS & Financial Audit System (Android)
+# Supermarket POS & Financial Audit System (Multi-Tenant SaaS)
 
-An enterprise-grade, modern Android application for Supermarket Point of Sale (POS) and Financial Auditing, rewritten in **Kotlin** and **Jetpack Compose** with **Room (SQLite)** local persistence.
-
----
-
-## Key Features
-
-### 1. Cashier Point of Sale (POS)
-- **Continuous Barcode Scanning & Quick-Picks**: Instant barcode lookup with quick-pick chips for popular supermarket items (`P001` to `P005`).
-- **Interactive Multi-Item Cart**: Real-time quantity adjustments (`+` / `-`), automatic stock availability enforcement, item removal, and subtotal recalculation.
-- **Thermal Invoice / Receipt Printing**: Modal receipt generator displaying unique receipt IDs, timestamp, itemized breakdown, and totals.
-- **Atomic Transaction Checkouts**: Atomically decrements stock, records sales transactions, updates general ledger balance, and writes to the audit log.
-
-### 2. Executive Financial Audit & Intelligence
-- **Real-Time KPI Metric Cards**: Current Balance, Net Profit / Loss, Total Money In, Total Money Out, Sales Revenue, and Inventory Valuation.
-- **Interactive Visual Analytics**: Custom Compose Canvas chart plotting actual profit progression alongside statistical linear regression trend lines.
-- **Machine Learning Profit Forecasting**: Statistical profit projection using linear regression, computing daily run-rate slope, 30-day, 90-day, and 365-day trajectories.
-- **Automated Stock Refill Alerts**: Visual badges and alert banners for items with low stock ($\le 50$ units) and critical stock ($\le 10$ units).
-- **Financial Ledger & Bookkeeping**: Instant recording of operational expense bills and revenue receipts with running balance updates.
-- **Inventory Management**: Add products, update prices, delete products, and search by barcode or name.
-
-### 3. Enterprise Security & Role-Based Access Control
-- **Cryptographic SHA-256 Hashing**: Passwords stored and validated with SHA-256 hashing.
-- **Role-Based Access Control (RBAC)**:
-  - **Admin**: Full access to POS, Admin Intelligence Hub, User Management, and Finance.
-  - **Cashier**: POS Cashier operations & barcode checkout only *(Admin Panel blocked with permission barrier)*.
-- **User Account Management**: Administrators can create new accounts, assign roles (`cashier` / `admin`), change passwords, and delete users.
-
-### 4. Database & CSV Synchronization
-- **ACID-Compliant Room SQLite Engine**: High-performance local storage with reactive Kotlin Coroutines `Flow`.
-- **CSV Data Export**: Built-in export function formatting inventory, sales, and balance history for external auditing.
+An enterprise-grade, multi-tenant Android application for Supermarket Point of Sale (POS), Inventory Auditing, Financial Intelligence, and Cloud Synchronization, built with **Kotlin**, **Jetpack Compose**, **Room SQLite**, and **Google Cloud Firestore / Firebase**.
 
 ---
 
-## Default Login Credentials
-
-| Username | Password | Role | Permissions |
-| :--- | :--- | :--- | :--- |
-| **`admin`** | `admin123` | **Administrator** | Full access to POS, Admin Intelligence Hub, User Management, and Finance |
-| **`john`** | `password1` | **Cashier** | POS Cashier operations & barcode checkout only *(Admin Panel blocked)* |
-| **`sarah`** | `securePass99` | **Cashier** | POS Cashier operations & barcode checkout only *(Admin Panel blocked)* |
-
----
-
-## Android Architecture
+## 1. System Architecture
 
 ```text
-app/src/main/java/com/example/
-├── MainActivity.kt                # Main activity entry point (Edge-to-Edge, ViewModel injection)
-├── data/
-│   ├── model/
-│   │   └── Entities.kt            # Room entities (Product, Sale, Balance, AuditLog, User) & models
-│   ├── dao/
-│   │   └── Daos.kt                # Room DAOs (ProductDao, SaleDao, BalanceDao, AuditLogDao, UserDao)
-│   ├── db/
-│   │   └── AppDatabase.kt         # Room database with seed data
-│   └── repository/
-│       └── SupermarketRepository.kt # Central business logic, checkout transaction, linear regression
-└── ui/
-    ├── theme/
-    │   ├── Color.kt               # Supermarket green & accent color palette
-    │   └── Theme.kt               # Material 3 Compose theme
-    ├── viewmodel/
-    │   ├── AuthViewModel.kt       # Authentication, RBAC & user management state
-    │   ├── PosViewModel.kt        # Cart, scanner, checkout & receipts state
-    │   └── AdminViewModel.kt      # Analytics, financial KPIs & inventory state
-    └── screens/
-        ├── MainApp.kt             # TopAppBar, BottomNavigationBar (5 tabs)
-        ├── PosScreen.kt           # Barcode scanner, cart & receipt dialog
-        ├── InventoryScreen.kt     # Stock alerts, product catalog & price editing
-        ├── FinanceScreen.kt       # Financial KPIs, bills/receipts & general ledger
-        ├── AnalyticsScreen.kt     # Linear regression canvas chart & profit forecasting
-        ├── AdminScreen.kt         # System diagnostics, RBAC user accounts & CSV sync
-        └── LoginScreen.kt         # Sign-in & quick demo profile switchers
+                               ┌──────────────────────────────────────────────────┐
+                               │            SaaS Platform Owner Console            │
+                               │      (Access restricted to isPlatformAdmin)      │
+                               └─────────────────────────┬────────────────────────┘
+                                                         │
+                                    /platform_analytics/global_summary
+                                                         │
+               ┌─────────────────────────────────────────┴────────────────────────────────────────┐
+               │                                                                                  │
+  ┌────────────▼──────────────┐                                                      ┌────────────▼──────────────┐
+  │   Tenant Store Alpha      │                                                      │   Tenant Store Beta       │
+  │   /stores/STR-001/        │                                                      │   /stores/STR-002/        │
+  ├───────────────────────────┤                                                      ├───────────────────────────┤
+  │ - products/               │                                                      │ - products/               │
+  │ - sales/ (immutable)      │                                                      │ - sales/ (immutable)      │
+  │ - ledger/ (immutable)     │                                                      │ - ledger/ (immutable)     │
+  │ - auditLogs/ (append-only)│                                                      │ - auditLogs/ (append-only)│
+  │ - syncEvents/             │                                                      │ - syncEvents/             │
+  │ - users/                  │                                                      │ - users/                  │
+  └───────────────────────────┘                                                      └───────────────────────────┘
 ```
+
+### Strict Tenant Isolation
+- **Firestore Partitioning**: All tenant assets reside strictly under `/stores/{storeId}/...`.
+- **Security Rules Enforcement**: Rules enforce `isStoreMember(storeId)` using verified token claims (`request.auth.token.store_id == storeId`). Cross-tenant read/write attempts immediately return `PERMISSION_DENIED`.
+- **Platform Analytics Boundary**: Global metrics (`/platform_analytics`) and cross-store security logs (`/security_events`) are accessible solely to verified SaaS platform owners (`isPlatformAdmin()`). Client store tokens cannot read or modify platform telemetry even if bypassing the Android UI.
+
+---
+
+## 2. Authentication & Credential Governance
+
+- **Zero Hardcoded Production Credentials**: All pre-baked default credentials have been removed. 
+- **First-Time Administrator Setup**: On initial launch on a fresh terminal, the application displays a secure first-time setup flow to initialize the store administrator with salted PBKDF2 encryption.
+- **Firebase Auth with Verified Custom Claims**: Production accounts authenticate via Firebase Authentication. Authorization is governed by trusted custom token claims issued by the Firebase Admin SDK:
+  - `store_id`: Binds the user to their specific store tenant.
+  - `role`: One of `OWNER`, `ADMIN`, `MANAGER`, `CASHIER`, `ACCOUNTANT`.
+  - `platform_admin`: Boolean flag granting SaaS Command Center access (assigned exclusively to the SaaS Platform Owner).
+- **Offline Cryptographic Security**: Local credentials are encrypted using PBKDF2 with unique cryptographic salts (`PasswordSecurity.kt`). Offline logins strictly evaluate against the local store cache and never grant SaaS Platform Owner privileges.
+
+---
+
+## 3. Server-Side Provisioning & Metrics Engine
+
+Administrative and provisioning scripts reside in `/server_provisioning/` and run securely using the Firebase Admin SDK:
+
+```bash
+# Install server dependencies
+cd server_provisioning
+npm install
+
+# 1. Provision SaaS Platform Owner
+export GOOGLE_APPLICATION_CREDENTIALS="/path/to/serviceAccountKey.json"
+node provision_saas_owner.js --email Zawaruldo69@gmail.com --displayName "SaaS Owner"
+
+# 2. Provision Tenant Store & Store Owner
+node provision_tenant_store.js --storeId STR-001 --storeName "Al-Makhzen Supermarket" --ownerEmail owner@almakhzen.com --ownerPassword "SecurePass123!"
+
+# 3. Create or Manage Store Employees
+node manage_store_employee.js create --storeId STR-001 --email cashier@almakhzen.com --password "CashierPass123!" --role CASHIER
+node manage_store_employee.js disable --storeId STR-001 --email cashier@almakhzen.com
+
+# 4. Authoritative Platform Business Metrics Aggregation
+node aggregate_platform_metrics.js
+
+# 5. Google Analytics 4 Server-Side Reporting Pipeline
+export GA4_PROPERTY_ID="your_ga4_property_id"
+node fetch_ga4_reporting.js
+
+# 6. Run Firestore Rules Security Test Suite
+npm run test-rules
+```
+
+---
+
+## 4. Truthful Cloud Synchronization
+
+- **Tenant Isolation**: Only records matching the authenticated `storeId` are ever read or written.
+- **Atomic Local Transactions**: Checkout decrements stock, records sales rows, appends general ledger balance, and writes audit logs inside a single SQLite transaction (`runInTransaction`).
+- **Idempotent Retries**: Sales and ledger documents are committed to immutable Firestore paths using stable deterministic keys. Retries reconcile against existing cloud records without duplicating rows.
+- **Full Bidirectional Sync**: Replicates Products, Sales, and Financial Ledger entries in both directions between SQLite/Room and Cloud Firestore.
+- **Durable Deletion Queue**: Product deletions are recorded in `pending_sync_deletions` in Room so deletions survive app restarts, network outages, and terminal reboots.
+- **Conflict Handling**: Remote product updates use last-write-wins based on `updated_at` timestamps while protecting uncommitted local changes and pending deletions.
+- **Accurate Metric Reporting**: Partial syncs record a `PARTIAL_SUCCESS` event with failure breakdowns. The successful sync timestamp advances only when all operations succeed without error.
+
+---
+
+## 5. Google Analytics 4 Telemetry & Separation of Metrics
+
+- **Real-Time Client Telemetry**: Application actions (logins, navigation, POS purchases with documented items array, inventory edits, security alerts) stream in real time via the Firebase Analytics SDK. Verifiable in Firebase Analytics DebugView.
+- **Strict Separation of Concerns**: Authoritative business metrics (revenue, transactions, stores, stock levels) are computed by the backend aggregation pipeline (`aggregate_platform_metrics.js`). Google Analytics reporting (sessions, feature usage) is queried server-side via the GA4 Reporting API (`fetch_ga4_reporting.js`).
+- **No Fabricated Fallbacks**: When GA4 reporting infrastructure is unconfigured, the dashboard displays "Not configured" rather than synthetic or hardcoded numbers.
+
+---
+
+## 6. Verification Suite & Diagnostics
+
+- **Production-Safe Diagnostics**: Production diagnostics in the Admin Center are strictly read-only. Unsafe fixed write tests (`TEST001`) have been replaced with read-only connectivity checks and isolated emulator test fixtures.
+- **Evidence-Based Reporting**: Checks only pass if they actually execute and succeed against the runtime Firebase project and Android package (`com.aistudio.supermarketpos.audit`).
+- **Multi-Phase E2E Checks**:
+  1. Phase 1: Firebase Initialization
+  2. Phase 2: Project ID & App ID Verification
+  3. Phase 4: Authentication State
+  4. Phase 7: Verified Custom Token Claims
+  5. Phase 8: Read-Only Firestore Connectivity
+  6. Phase 13: Tenant Isolation Verification (requires `PERMISSION_DENIED` on foreign store)
+  7. Phase 14: Platform Metrics Authorization Barrier (verifies platform admin access / tenant denial)
+  8. Phase 19: Client Secret Audit (confirms zero embedded private keys)

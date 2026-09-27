@@ -2,105 +2,142 @@ rules_version = '2';
 service cloud.firestore {
   match /databases/{database}/documents {
 
-    // Helper functions for Authentication, Tenant Isolation & RBAC
+    // Default deny all access
+    match /{document=**} {
+      allow read, write: if false;
+    }
+
+    // --- Helper Functions ---
     function isAuthenticated() {
       return request.auth != null;
+    }
+
+    function isPlatformAdmin() {
+      return isAuthenticated() && 
+        (request.auth.token.platform_admin == true || request.auth.token.role == 'SAAS_OWNER');
     }
 
     function isStoreMember(storeId) {
       return isAuthenticated() && request.auth.token.store_id == storeId;
     }
 
-    function isPlatformAdmin() {
-      return isAuthenticated() && (request.auth.token.platform_admin == true || request.auth.token.role == 'SAAS_OWNER');
-    }
-
-    function hasStoreRole(storeId, role) {
-      return isStoreMember(storeId) && request.auth.token.role == role;
+    function hasAnyRole(storeId, allowedRoles) {
+      return isStoreMember(storeId) && (request.auth.token.role in allowedRoles);
     }
 
     // ==================================================
-    // 1. TENANT STORES & ISOLATION
+    // 1. TENANT STORES & ISOLATION (/stores/{storeId})
     // ==================================================
     match /stores/{storeId} {
-      // Store settings and metadata
+      // Store settings & metadata
       allow read: if isStoreMember(storeId) || isPlatformAdmin();
-      allow update: if hasStoreRole(storeId, 'OWNER') || hasStoreRole(storeId, 'ADMIN');
-      allow create, delete: if isPlatformAdmin(); // New tenant stores provisioned by platform
+      // Only store OWNER or ADMIN can update general profile info (cannot alter subscription or storeId)
+      allow update: if (hasAnyRole(storeId, ['OWNER', 'ADMIN']) || isPlatformAdmin())
+                    && request.resource.data.store_id == storeId
+                    && (!request.resource.data.diff(resource.data).affectedKeys().hasAny(['subscription_status', 'store_id']));
+      // New tenant store creation is reserved strictly to SaaS platform admin / Admin SDK
+      allow create, delete: if isPlatformAdmin();
 
-      // Products subcollection
+      // --- 1.1 Products (/stores/{storeId}/products/{productId}) ---
       match /products/{productId} {
         allow read: if isStoreMember(storeId) || isPlatformAdmin();
-        allow write: if isStoreMember(storeId) &&
-                     (request.auth.token.role in ['OWNER', 'ADMIN', 'MANAGER', 'INVENTORY']);
+        // Writes allowed only for OWNER, ADMIN, MANAGER, INVENTORY roles of that store
+        allow write: if isStoreMember(storeId) 
+                     && hasAnyRole(storeId, ['OWNER', 'ADMIN', 'MANAGER', 'INVENTORY'])
+                     && request.resource.data.store_id == storeId
+                     && request.resource.data.product_id == productId
+                     && request.resource.data.product_price is number
+                     && request.resource.data.product_price >= 0;
       }
 
-      // Sales subcollection (POS checkout transactions)
+      // --- 1.2 Sales (/stores/{storeId}/sales/{saleId}) ---
+      // Immutable POS Checkout Transactions
       match /sales/{saleId} {
         allow read: if isStoreMember(storeId) || isPlatformAdmin();
-        allow create: if isStoreMember(storeId); // Cashiers & above can register sales
-        allow update, delete: if false; // Immutable sales ledger
+        // Any authenticated store member (e.g. cashier) can record a sale
+        allow create: if isStoreMember(storeId)
+                      && request.resource.data.store_id == storeId
+                      && request.resource.data.sale_id == saleId
+                      && request.resource.data.price is number
+                      && request.resource.data.quantity is int;
+        // Sales records are strictly immutable: no client update or delete
+        allow update, delete: if false;
       }
 
-      // Financial ledger entries
+      // --- 1.3 Financial Ledger (/stores/{storeId}/ledger/{ledgerId}) ---
+      // Immutable Financial Ledger
       match /ledger/{ledgerId} {
-        allow read: if isStoreMember(storeId) &&
-                     (request.auth.token.role in ['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER']) ||
-                     isPlatformAdmin();
-        allow create: if isStoreMember(storeId) &&
-                      (request.auth.token.role in ['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER']);
-        allow update, delete: if false; // Immutable financial ledger
+        allow read: if (isStoreMember(storeId) && hasAnyRole(storeId, ['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER']))
+                    || isPlatformAdmin();
+        allow create: if isStoreMember(storeId)
+                      && hasAnyRole(storeId, ['OWNER', 'ADMIN', 'ACCOUNTANT', 'MANAGER'])
+                      && request.resource.data.store_id == storeId;
+        // Financial ledger records are strictly immutable: no client update or delete
+        allow update, delete: if false;
       }
 
-      // Users and employees in this specific store
+      // --- 1.4 Store Users (/stores/{storeId}/users/{userId}) ---
       match /users/{userId} {
-        allow read: if isStoreMember(storeId) || isPlatformAdmin();
-        allow write: if isStoreMember(storeId) &&
-                     (request.auth.token.role in ['OWNER', 'ADMIN']);
+        // A user can read their own profile; store OWNER/ADMIN or platform admin can read all store users
+        allow read: if (isStoreMember(storeId) && (request.auth.uid == userId || hasAnyRole(storeId, ['OWNER', 'ADMIN'])))
+                    || isPlatformAdmin();
+        // Server Admin SDK or SaaS Admin creates/updates claims and user records.
+        // Store OWNER/ADMIN can manage store employee documents without elevating platform privileges.
+        allow create: if isPlatformAdmin() || 
+                      (isStoreMember(storeId) && hasAnyRole(storeId, ['OWNER', 'ADMIN'])
+                       && request.resource.data.store_id == storeId
+                       && request.resource.data.role in ['OWNER', 'ADMIN', 'MANAGER', 'CASHIER', 'ACCOUNTANT']);
+        allow update: if isPlatformAdmin() || 
+                      (isStoreMember(storeId) && hasAnyRole(storeId, ['OWNER', 'ADMIN'])
+                       && request.resource.data.store_id == storeId
+                       && !request.resource.data.diff(resource.data).affectedKeys().hasAny(['store_id', 'platform_admin']));
+        allow delete: if isPlatformAdmin() || 
+                      (isStoreMember(storeId) && hasAnyRole(storeId, ['OWNER', 'ADMIN']) && request.auth.uid != userId);
       }
 
-      // Store-specific Audit Logs (Append-only)
+      // --- 1.5 Store Audit Logs (/stores/{storeId}/auditLogs/{logId}) ---
       match /auditLogs/{logId} {
-        allow read: if isStoreMember(storeId) &&
-                     (request.auth.token.role in ['OWNER', 'ADMIN']) ||
-                     isPlatformAdmin();
-        allow create: if isStoreMember(storeId);
-        allow update, delete: if false; // Historical audit logs cannot be edited or deleted
+        allow read: if (isStoreMember(storeId) && hasAnyRole(storeId, ['OWNER', 'ADMIN'])) || isPlatformAdmin();
+        allow create: if isStoreMember(storeId) && request.resource.data.store_id == storeId;
+        allow update, delete: if false; // Append-only audit trail
       }
 
-      // Sync Events (Replication & Diagnostic tracking)
+      // --- 1.6 Sync Events (/stores/{storeId}/syncEvents/{syncId}) ---
       match /syncEvents/{syncId} {
         allow read: if isStoreMember(storeId) || isPlatformAdmin();
-        allow create: if isStoreMember(storeId);
+        allow create: if isStoreMember(storeId) && request.resource.data.store_id == storeId;
         allow update, delete: if false;
       }
     }
 
     // ==================================================
-    // 2. PLATFORM ADMIN ACCESS AUDIT LOGGING
-    // ==================================================
-    match /admin_access_logs/{logId} {
-      allow read: if isPlatformAdmin();
-      allow create: if isPlatformAdmin() &&
-                    request.resource.data.keys().hasAll(['admin_id', 'store_id', 'timestamp', 'action', 'reason']);
-      allow update, delete: if false; // Append-only compliance log
-    }
-
-    // ==================================================
-    // 3. SECURITY EVENTS LOGGING
+    // 2. SECURITY EVENTS (/security_events/{eventId})
     // ==================================================
     match /security_events/{eventId} {
       allow read: if isPlatformAdmin();
-      allow create: if isAuthenticated();
+      // Allow authenticated devices to log genuine security events, preventing forged identity
+      allow create: if isAuthenticated() 
+                    && request.resource.data.user_id == request.auth.uid
+                    && request.resource.data.keys().hasAll(['event_type', 'timestamp', 'severity', 'user_id', 'store_id']);
       allow update, delete: if false;
     }
 
     // ==================================================
-    // 4. SAAS PLATFORM ANALYTICS & OWNER METRICS
+    // 3. ADMIN ACCESS AUDIT LOGS (/admin_access_logs/{logId})
+    // ==================================================
+    match /admin_access_logs/{logId} {
+      allow read: if isPlatformAdmin();
+      allow create: if isPlatformAdmin()
+                    && request.resource.data.keys().hasAll(['admin_id', 'store_id', 'timestamp', 'action', 'reason'])
+                    && request.resource.data.admin_id == request.auth.uid;
+      allow update, delete: if false;
+    }
+
+    // ==================================================
+    // 4. SAAS PLATFORM ANALYTICS (/platform_analytics/{docId})
     // ==================================================
     match /platform_analytics/{docId} {
-      // Strictly restricted to SaaS Platform Owners/Admins
-      // Client/store tenants are blocked by security rules from reading or writing global platform analytics
+      // Exclusively restricted to SaaS Platform Owner / Admin claims
       allow read, write: if isPlatformAdmin();
     }
 

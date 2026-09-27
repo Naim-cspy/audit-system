@@ -227,13 +227,16 @@ data class VerificationSuiteReport(
 
 data class PlatformMetricsSummary(
     val totalStores: Int = 0,
+    val activeStores: Int = 0,
     val totalUsers: Int = 0,
     val totalSalesVolumeUsd: Double = 0.0,
     val totalTransactionsCount: Int = 0,
     val totalInventorySkus: Int = 0,
     val totalLowStockAlerts: Int = 0,
     val totalAuditEventsCount: Int = 0,
-    val totalSessionsCount: Int = 0,
+    val totalSessionsCount: Int? = null,
+    val totalLoginsCount: Int? = null,
+    val gaReportingConfigured: Boolean = false,
     val featureUsageMap: Map<String, Long> = emptyMap(),
     val suspiciousEventsCount: Int = 0,
     val suspiciousEvents: List<SecurityEventEntity> = emptyList(),
@@ -252,4 +255,17 @@ data class StorePlatformSummary(
     val inventoryCount: Int = 0,
     val lastActiveTimestamp: Long = System.currentTimeMillis()
 )
+
+@Entity(
+    tableName = "pending_sync_deletions",
+    primaryKeys = ["store_id", "entity_type", "entity_id"],
+    indices = [Index(value = ["store_id"])]
+)
+data class PendingSyncDeletionEntity(
+    val store_id: String,
+    val entity_type: String, // "PRODUCT"
+    val entity_id: String,   // product_id
+    val timestamp: Long = System.currentTimeMillis()
+)
+
 

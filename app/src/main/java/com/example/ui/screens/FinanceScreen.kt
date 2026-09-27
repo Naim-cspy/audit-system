@@ -65,8 +65,50 @@ import com.example.ui.viewmodel.AdminViewModel
 @Composable
 fun FinanceScreen(
     adminViewModel: AdminViewModel,
+    userRole: String? = null,
     modifier: Modifier = Modifier
 ) {
+    val roleUpper = (userRole ?: "ADMIN").trim().uppercase()
+    val canAccessFinance = roleUpper in setOf("OWNER", "ADMIN", "ACCOUNTANT", "MANAGER", "SAAS_OWNER")
+
+    if (!canAccessFinance) {
+        Box(
+            modifier = modifier.fillMaxSize().padding(24.dp),
+            contentAlignment = Alignment.Center
+        ) {
+            ElevatedCard(
+                shape = RoundedCornerShape(12.dp),
+                modifier = Modifier.fillMaxWidth().testTag("finance_access_denied_card")
+            ) {
+                Column(
+                    modifier = Modifier.padding(24.dp),
+                    horizontalAlignment = Alignment.CenterHorizontally
+                ) {
+                    Icon(
+                        imageVector = Icons.Default.AccountBalance,
+                        contentDescription = "Access Restricted",
+                        tint = CriticalRed,
+                        modifier = Modifier.size(54.dp)
+                    )
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Text(
+                        text = "Access Restricted",
+                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold),
+                        color = CriticalRed
+                    )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "Your account has the role '${userRole ?: "CASHIER"}'. Financial ledger records, cash balance, and expense entries are restricted to Store Accountant, Manager, and Administrator accounts.",
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = Color.Gray,
+                        textAlign = androidx.compose.ui.text.style.TextAlign.Center
+                    )
+                }
+            }
+        }
+        return
+    }
+
     val summary by adminViewModel.financialSummary.collectAsState()
     val balanceHistory by adminViewModel.balanceHistory.collectAsState()
 
